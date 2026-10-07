@@ -7,18 +7,18 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.8.0` |
-| État | MVP fonctionnel durci après revue sécurité/RGPD interne, avec interface statique, métriques pilote agrégées locales et API locale authentifiée par organisation ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.9.0` |
+| État | MVP fonctionnel durci, avec métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié et API de validation locale authentifiée ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 7 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
-| Hébergement configuré | Site statique dont la racine de publication est `dist/` ; l'API Node n'est pas déployée par cet hébergement |
+| Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
 | Langue actuelle | Français |
-| Architecture | HTML, CSS et JavaScript natifs dans le navigateur ; serveur Node local pour l'API pilote `/api/v1` |
+| Architecture | HTML, CSS et JavaScript natifs sous `web/` ; Worker sans stockage pour les connecteurs d’identité ; serveur Node local pour l’ensemble de l’API pilote `/api/v1` |
 | Promesse courte | **Rendre les factures conformes avant envoi, puis identifier les paiements qui peuvent être compensés.** |
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 43 tests au 7 octobre 2026 |
+| Tests automatisés | 53 tests au 7 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -152,7 +152,9 @@ Légende :
 | Identité | Clés API d'organisation | Partiel | Hashes et quotas en mémoire ; aucun compte, session, membre ou rôle utilisateur |
 | Identité | Comptes, organisations multi-utilisateurs, rôles | Prévu | Nécessite stockage d'identité, sessions, invitations et droits persistants |
 | Réseau | Invitations et contreparties vérifiées | Prévu | Condition du vrai effet réseau |
-| Connecteurs | VIES, Peppol Directory, PDP/PA, ERP | Prévu | APIs, quotas, disponibilité et conformité à cadrer |
+| Connecteurs | VIES | Opérationnel | Requête explicite sans stockage ; réponse ponctuelle, disponibilité amont et portée juridique limitées |
+| Connecteurs | Peppol Directory | Opérationnel | Recherche exacte limitée à 2/s ; présence d’annuaire distincte de la joignabilité SMP |
+| Connecteurs | PDP/PA et ERP | Prévu | APIs, authentification, quotas et gouvernance à cadrer |
 | Workflow | Acceptation multilatérale de la compensation | Prévu | Signature, horodatage et règles juridiques |
 | Paiement | Exécution du résiduel | Bloqué partenaire / juridique | À confier à un PSP/établissement habilité après analyse |
 | Production | Journal d'audit, supervision, sauvegarde | Prévu | Obligatoire avant données réelles sensibles |
@@ -238,7 +240,7 @@ Sorties :
 - rapport JSON structuré ;
 - synthèse et export CSV d'un lot.
 
-Confidentialité actuelle : dans l'interface, le fichier est traité en mémoire et aucune requête métier vers un serveur SettleMesh n'est effectuée. Le XML brut est retiré avant l'enregistrement du résultat dans l'historique. L'API v1 constitue un canal distinct et explicite : son client envoie le XML au serveur local, qui le traite sans le persister ni le renvoyer.
+Confidentialité actuelle : dans l'interface, le fichier est traité en mémoire et aucune requête contenant son contenu n'est envoyée à un serveur SettleMesh. Le XML brut est retiré avant l'enregistrement du résultat dans l'historique. L'API v1 de validation constitue un canal distinct et explicite : son client envoie le XML au serveur local, qui le traite sans le persister ni le renvoyer. Les routes d’identité ne reçoivent jamais le contenu d’une facture.
 
 ### 4.4 SettleMesh Net — route `#netting`
 
@@ -323,9 +325,11 @@ Sources actives :
 
 - EN 16931 version 1.3.16 pour UBL et CII ;
 - Peppol BIS Billing version 3.0.21 pour les UBL déclarant ce profil ;
+- VIES pour une validation ponctuelle d’un numéro TVA ;
+- Peppol Directory pour une recherche exacte de participant ;
 - règles configurées par le destinataire.
 
-Connecteur seulement annoncé : VIES. Il n'est pas encore exécuté.
+Les deux connecteurs d’identité sont déclenchés uniquement au clic. Ils affichent `vérifié`, `non vérifié` ou `indisponible`, l’horodatage et les limites de portée. SettleMesh ne persiste ni l’identifiant vérifié ni la réponse. VIES ne certifie pas une entreprise ; Peppol Directory ne garantit ni la joignabilité SMP ni la livraison d’une facture.
 
 ## 5. Contrôles de facture détaillés
 
@@ -424,11 +428,12 @@ SettleMesh/
 ├── PROJECT_DASHBOARD.md         source de vérité produit et technique
 ├── README.md                    prise en main courte
 ├── package.json                 version, scripts et dépendances
-├── .openai/hosting.json         publication statique de dist/
-├── dist/
+├── .openai/hosting.json         identité et configuration du Worker Sites
+├── web/
 │   ├── index.html               structure des six vues
 │   ├── styles.css               design system et responsive
 │   ├── app.js                   état, navigation, rendu et interactions
+│   ├── identity.js              client same-origin VIES / Peppol
 │   ├── storage.js               persistance locale et migration de l'ancienne marque
 │   ├── svrl.js                  lecture partagée des rapports de validation officiels
 │   ├── core.js                  profil, parsing et validation métier facture
@@ -438,9 +443,16 @@ SettleMesh/
 │   ├── netting.js               parsing CSV et moteur de compensation
 │   ├── validation/              artefacts XSLT compilés en SEF
 │   └── vendor/                  runtimes PDF.js et SaxonJS pour le navigateur
+├── worker/
+│   ├── index.js                 routes d’identité, quotas et service des assets
+│   └── identity.mjs             validation des entrées et appels officiels normalisés
+├── dist/                        artefact Worker généré et ignoré par Git
+│   ├── client/                  copie de web/ pour publication
+│   └── server/                  Worker et configuration des assets
 ├── scripts/
 │   ├── serve.mjs                lancement de l'application et de l'API locale, port 4173
 │   ├── create-api-key.mjs       génération locale d'une clé et de son hash de configuration
+│   ├── build-site-worker.mjs    construction déterministe de dist/
 │   └── build-validation-assets.mjs
 │                                compilation/copie des moteurs normatifs
 ├── test/
@@ -449,6 +461,7 @@ SettleMesh/
 │   ├── netting.test.js          invariants de compensation et CSV
 │   ├── storage.test.js          priorité et migration du stockage local
 │   ├── metrics.test.js          agrégation, bornes et confidentialité des métriques
+│   ├── identity.test.js         VIES, Peppol, états et minimisation des réponses
 │   ├── api.test.js              contrat HTTP, confidentialité et limites API
 │   ├── auth.test.js             clés, hashes, rotation et configuration d'organisation
 │   └── fixtures/                documents de test
@@ -490,13 +503,16 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 - `xslt3 2.7.0` : compilation des artefacts de validation.
 - `pdfjs-dist 6.4.299` : lecture des pièces jointes PDF.
 - `@xmldom/xmldom 0.9.12` : parsing XML dans le runtime Node de l'API.
-- Aucun framework frontend ni service externe à l'exécution métier actuelle.
+- Aucun framework frontend.
+- Services externes appelés uniquement à la demande : VIES (`ec.europa.eu`) et Peppol Directory (`directory.peppol.eu`).
 
 ### 7.4 API de validation v1
 
-Le serveur local expose `GET /api/v1/health` et `POST /api/v1/validate`. La validation reçoit un JSON contenant le XML, un profil optionnel et un nom de source. Elle exige une clé Bearer dont seul le hash SHA-256 est configuré côté serveur, détermine l'organisation depuis cette clé, puis exécute les contrôles produit, EN 16931 et, si applicable, Peppol. La réponse ne contient pas le XML brut et porte `stored: false`.
+Le serveur local expose `GET /api/v1/health`, `POST /api/v1/validate`, `POST /api/v1/identity/vies` et `POST /api/v1/identity/peppol`. La validation reçoit un JSON contenant le XML, un profil optionnel et un nom de source. Elle exige une clé Bearer dont seul le hash SHA-256 est configuré côté serveur, détermine l'organisation depuis cette clé, puis exécute les contrôles produit, EN 16931 et, si applicable, Peppol. La réponse ne contient pas le XML brut et porte `stored: false`.
 
-Limites : corps HTTP de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé elle reste fermée. Elle n'ouvre pas CORS et n'est pas déployée avec le site statique. Le serveur applique CSP, anti-frame, `nosniff`, politiques referrer/permissions et isolation cross-origin. Les secrets, révocations et quotas ne sont pas encore persistants. Le contrat de référence est `docs/openapi.yaml`.
+Le Worker publié n’expose que les deux routes d’identité. Elles sont same-origin, limitées, sans base de données et renvoient une réponse normalisée `verified`, `not_verified` ou `unavailable`. Le pays et le numéro TVA ou l’identifiant Peppol transitent vers la source officielle après un clic explicite. SettleMesh ne met en cache ni la requête ni la réponse.
+
+Limites : corps HTTP de validation de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé la validation reste fermée. Les routes d’identité utilisent un délai amont de 8 secondes ; Peppol est limité au mieux à deux recherches par seconde, conformément à sa documentation publique. Aucun endpoint n’ouvre CORS. Le serveur et le Worker appliquent CSP, anti-frame, `nosniff`, politiques referrer/permissions et isolation cross-origin. Les secrets, révocations et quotas distribués ne sont pas encore persistants. Le contrat de référence est `docs/openapi.yaml`.
 
 ## 8. Invariants à ne jamais casser
 
@@ -510,7 +526,9 @@ Limites : corps HTTP de 2 Mo, XML de 1 Mo, protection générale de 120 requête
 
 ### 8.2 Invariants confidentialité
 
-- L'interface navigateur ne transmet pas le contenu des factures à un backend SettleMesh ; seul un client intégrateur appelle explicitement l'API locale.
+- L'interface navigateur ne transmet pas le contenu des factures à un backend SettleMesh ; seul un client intégrateur appelle explicitement l'API locale de validation.
+- Une vérification d’identité doit rester une action explicite et ne transmettre que le pays/numéro TVA ou l’identifiant Peppol nécessaire à la source annoncée.
+- Les requêtes et réponses VIES/Peppol ne doivent pas être persistées ni entrer dans la télémétrie ; une panne amont doit rester `indisponible`, jamais `vérifié` ou `non vérifié`.
 - Le XML brut ne doit pas entrer dans l'historique persistant.
 - Le diagnostic détaillé ne doit pas être persisté ; l'historique est limité à une liste blanche de champs, 100 entrées et 30 jours.
 - L'API ne doit ni persister, ni renvoyer, ni journaliser le XML brut.
@@ -542,11 +560,11 @@ Limites : corps HTTP de 2 Mo, XML de 1 Mo, protection générale de 120 requête
 
 ### 9.1 Position actuelle
 
-SettleMesh v0.8 fournit un précontrôle technique, des métriques pilote agrégées locales, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
+SettleMesh v0.9 fournit un précontrôle technique, des vérifications VIES/Peppol ponctuelles, des métriques pilote agrégées locales, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne certifie pas une entreprise, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
 
 ### 9.2 Revue sécurité et RGPD interne
 
-La revue du 7 octobre 2026 est consignée dans `docs/SECURITY.md`. Elle couvre le frontend statique, le stockage navigateur, les imports non fiables, l'API locale, les dépendances, les actifs, frontières de confiance, menaces et portes de production. La version `0.8.0` ajoute une CSP, des protections anti-frame et cross-origin sur le serveur, le rejet des `DOCTYPE` côté navigateur, ainsi qu'une liste blanche et une rétention de 30 jours pour l'historique persistant. `npm audit` ne signale aucune vulnérabilité connue à la date de la revue.
+La revue du 7 octobre 2026 est consignée dans `docs/SECURITY.md`. Elle couvre le frontend, le Worker, le stockage navigateur, les imports non fiables, les connecteurs externes, l'API locale, les dépendances, les actifs, frontières de confiance, menaces et portes de production. La version `0.8.0` a ajouté CSP, protections anti-frame/cross-origin, rejet des `DOCTYPE` et rétention de 30 jours ; la version `0.9.0` ajoute la minimisation et la non-persistance des vérifications VIES/Peppol, des délais et quotas explicites et trois états non ambigus. `npm audit` ne signale aucune vulnérabilité connue à la date de la revue.
 
 Cette revue est interne et préliminaire. Elle ne vaut ni pentest indépendant, ni analyse juridique, ni validation RGPD. Comptes, rôles, TLS de production, gestionnaire de secrets, révocation, quotas persistants, chiffrement au repos et procédure d'incident testée restent des prérequis avant des données réelles partagées.
 
@@ -650,7 +668,7 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 43 tests
+### 12.2 Couverture actuelle des 53 tests
 
 `test/core.test.js` — 13 tests :
 
@@ -696,7 +714,17 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - export JSON à liste blanche avec garanties de confidentialité explicites ;
 - normalisation et bornage d’une sauvegarde altérée.
 
-`test/api.test.js` — 11 tests :
+`test/identity.test.js` — 8 tests :
+
+- normalisation et rejet des entrées VIES ;
+- formes d’identifiant Peppol acceptées ;
+- résultat VIES positif minimisé ;
+- distinction VIES négatif / indisponible ;
+- extraction Peppol sans contacts ni capacités brutes ;
+- absence de participant Peppol ;
+- routes navigateur strictement same-origin.
+
+`test/api.test.js` — 13 tests :
 
 - santé, version et absence de persistance ;
 - validation complète d'un UBL sans restitution du XML ;
@@ -706,6 +734,8 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - limitation de débit explicite ;
 - refus d'une clé absente ou invalide ;
 - fermeture de l'API quand aucune clé n'est configurée ;
+- vérifications VIES/Peppol sans clé et sans persistance ;
+- rejet des entrées et méthodes invalides des routes d’identité ;
 - isolation du quota par organisation ;
 - rejet des requêtes dépassant la taille maximale ;
 - en-têtes de sécurité, refus des méthodes statiques non prévues et des traversées de répertoire.
@@ -726,6 +756,8 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - exporter TXT, JSON et CSV ;
 - rechercher et filtrer l'historique ;
 - importer puis exporter un profil ;
+- vérifier un numéro TVA valide et invalide, puis distinguer une panne VIES ;
+- vérifier un participant Peppol présent et absent, sans interpréter la présence comme une garantie de livraison ;
 - charger le réseau de démonstration Net ;
 - vérifier 315 000 € brut, 260 000 € compensable, 55 000 € résiduel et 82,5 % ;
 - importer un CSV multidevise ;
@@ -743,7 +775,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - [x] Protéger l'API pilote avec clés Bearer hashées, organisation déterminée côté serveur, rotation et quotas en mémoire ; secrets et quotas persistants restent requis avant production.
 - [ ] Ajouter les contrôles nationaux du premier marché cible.
 - [ ] Vérifier la conformité PDF/A-3 de Factur-X, pas seulement le XML embarqué.
-- [ ] Ajouter VIES et Peppol Directory avec états `vérifié`, `indisponible`, `non vérifié` distincts.
+- [x] Ajouter VIES et Peppol Directory avec états `vérifié`, `indisponible`, `non vérifié` distincts, requêtes explicites et aucune persistance côté SettleMesh.
 - [x] Instrumenter localement les métriques d'activation sans collecter le contenu ni les identifiants des factures ; toute télémétrie serveur reste soumise à consentement et analyse RGPD.
 - [x] Réaliser une revue sécurité/RGPD interne et un modèle de menace OWASP ; le pentest et les validations juridique/RGPD externes restent obligatoires avant production.
 - [ ] Obtenir 3 à 5 entreprises pilotes et mesurer les rejets évités.
@@ -793,7 +825,9 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Créance cédée ou litigieuse incluse | Critique | Champs d'exclusion aujourd'hui ; vérification et preuves à construire |
 | Fuite de données de facturation | Critique | Traitement local, historique à liste blanche sur 30 jours, CSP et modèle de menace ; architecture serveur, chiffrement, droits et audit externe avant données réelles partagées |
 | Règles officielles obsolètes | Élevé | Versions affichées, artefacts vendoriés, processus de mise à jour à instaurer |
-| Identités d'entreprises ambiguës | Élevé | Normalisation simple aujourd'hui ; KYB et identifiants légaux demain |
+| Identités d'entreprises ambiguës | Élevé | VIES et Peppol ponctuels, horodatés et non persistés ; KYB complet et identifiants légaux demain |
+| Indisponibilité ou quota d’une source officielle | Élevé | Timeout, état `indisponible` distinct, limite Peppol 2/s et lien direct vers la source ; aucun succès par défaut |
+| Identifiant transmis à une source externe sans compréhension | Élevé | Action manuelle, libellé de la source, donnée minimale et avertissement de non-persistance ; information RGPD externe à valider avant pilote réel |
 | CSV incorrect ou malveillant | Moyen | Limites, validation, échappement HTML et neutralisation des formules |
 | Métriques pilote interprétées comme audience globale | Moyen | Libellés « local », export volontaire et distinction explicite entre CheckLink copié et ouverture externe non mesurée |
 | Réapparition de l'ancienne marque Eurule | Faible | SettleMesh est la marque mère depuis v0.4 ; les anciens profils et données locales restent importables uniquement pour compatibilité |
@@ -816,6 +850,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-07 | Authentifier l'API pilote par clé hashée rattachée à une organisation | Fermer l'endpoint par défaut et préparer une facturation/quota par client sans stocker de compte utilisateur | Clé brute affichée une fois, organisation dérivée côté serveur, rotation possible ; identité humaine et persistance restent hors périmètre |
 | 2026-10-07 | Mesurer l’activation par agrégats locaux exportables | Donner aux pilotes et investisseurs des preuves d’usage sans transmettre le contenu des factures | Compteurs à liste blanche dans le navigateur ; aucune télémétrie réseau ni mesure des ouvertures externes sans consentement |
 | 2026-10-07 | Durcir le MVP après revue sécurité/RGPD interne | Réduire l'exposition locale et rendre les risques de production explicites sans promettre une conformité juridique | Historique compact sur 30 jours, diagnostic détaillé non persistant, CSP et anti-frame, modèle de menace documenté ; audit externe toujours requis |
+| 2026-10-07 | Activer VIES et Peppol Directory derrière un Worker minimal | Les APIs officielles ne sont pas appelables fiablement depuis une page statique à cause des politiques navigateur, mais la vérification doit fonctionner dans le produit publié | Identifiant minimal transmis au clic, aucun stockage, trois états distincts, quotas/délais explicites ; le contenu des factures reste local |
 
 ## 16. Questions ouvertes à trancher
 

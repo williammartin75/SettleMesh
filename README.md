@@ -12,6 +12,8 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - lecture locale des factures XML UBL/CII et extraction du XML embarqué dans les PDF Factur-X ;
 - exécution locale des règles officielles EN 16931 v1.3.16 pour UBL et CII ;
 - exécution locale des règles Peppol BIS Billing 3.0.21 pour les documents UBL Peppol ;
+- vérification à la demande d’un numéro de TVA auprès de VIES, avec résultat horodaté `vérifié`, `non vérifié` ou `indisponible` ;
+- recherche exacte d’un identifiant dans Peppol Directory, avec les mêmes états explicites et sans confusion avec une garantie de joignabilité ;
 - contrôles du destinataire, de la TVA, de l’adresse électronique, du numéro de commande et des totaux ;
 - diagnostic détaillé avec références EN 16931 `BT-*` ;
 - rapport téléchargeable et historique local minimisé, limité à 100 entrées et 30 jours ;
@@ -27,7 +29,8 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - tableau d’impact pilote avec métriques agrégées locales : CheckLinks copiés, fichiers soumis, taux analysable, taux prêt et temps moyen ;
 - export JSON volontaire de ces métriques, sans contenu, identifiant, montant ou fournisseur de facture ;
 - interface fournisseur utilisable sans compte ;
-- aucune transmission serveur depuis l'interface navigateur, aucune télémétrie automatique et aucune persistance dans l'API pilote.
+- aucune transmission serveur du contenu des factures depuis l'interface navigateur, aucune télémétrie automatique et aucune persistance dans les APIs pilotes ;
+- transmission minimale du pays et du numéro TVA ou de l’identifiant Peppol uniquement après un clic explicite, le temps d’interroger la source officielle.
 
 Le modèle de menace, l'inventaire des données, la revue OWASP/RGPD préliminaire et les portes de mise en production sont documentés dans [`docs/SECURITY.md`](./docs/SECURITY.md).
 
@@ -37,6 +40,7 @@ Le modèle de menace, l'inventaire des données, la revue OWASP/RGPD préliminai
 npm test
 npm run check
 npm run build:validator
+npm run build:site
 npm run api:key -- atelier-nova
 npm run serve
 ```
@@ -45,7 +49,7 @@ Puis ouvrir `http://127.0.0.1:4173`.
 
 La commande `api:key` affiche une clé une seule fois et l'objet de configuration contenant uniquement son hash SHA-256. Placer cet objet dans la variable `SETTLEMESH_API_KEYS` avant de lancer le serveur. Aucun secret ne doit être ajouté au dépôt ou au CheckLink.
 
-Le serveur local expose également `GET /api/v1/health` et `POST /api/v1/validate`. Le contrat, les exemples et les limites de sécurité sont décrits dans [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Cette API pilote n'est pas incluse dans l'hébergement statique. Les clés et quotas sont encore configurés en mémoire : malgré la revue interne initiale, un gestionnaire de secrets, une révocation persistante, TLS, des contrôles d'infrastructure et un pentest externe restent nécessaires avant une exposition Internet.
+Le serveur local expose également `GET /api/v1/health`, `POST /api/v1/validate`, `POST /api/v1/identity/vies` et `POST /api/v1/identity/peppol`. Le contrat, les exemples et les limites de sécurité sont décrits dans [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Le Site publié embarque uniquement les deux routes d’identité dans un Worker sans stockage ; l’API de validation de factures reste locale. Les clés et quotas de validation sont encore configurés en mémoire : malgré la revue interne initiale, un gestionnaire de secrets, une révocation persistante, TLS, des contrôles d'infrastructure et un pentest externe restent nécessaires avant son exposition Internet.
 
 ## Démonstration
 
@@ -59,6 +63,8 @@ Il est aussi possible de déposer jusqu’à 20 fichiers en une fois. Le tableau
 Dans **Mon CheckLink**, le profil peut être exporté en JSON puis réimporté dans un autre navigateur. Dans **Contrôles**, l’historique peut être recherché, filtré et exporté en CSV. Il est conservé uniquement dans le navigateur, pendant 30 jours et dans la limite de 100 résultats ; le diagnostic détaillé reste limité à la session courante.
 
 La **Vue d’ensemble** contient aussi un bloc « Mesure pilote ». Ses compteurs sont enregistrés dans le navigateur, séparément de l’historique limité à 100 résultats. Ils peuvent être exportés volontairement en JSON ou remis à zéro sans supprimer l’historique. Cet export ne contient pas le XML, les numéros de facture, les fournisseurs, les montants ni les identifiants fiscaux.
+
+Dans **Sources & règles**, les contrôles VIES et Peppol Directory sont lancés manuellement. Un état « vérifié » signifie uniquement que la source a répondu positivement à l’instant indiqué. Les identifiants et réponses ne sont pas ajoutés à l’historique SettleMesh ni au stockage du navigateur.
 
 ## SettleMesh Net
 
@@ -74,4 +80,4 @@ Cette fonctionnalité est une simulation d’aide à la décision. Elle ne dépl
 
 ## Périmètre
 
-Les contrôles sont une aide à la préparation et ne constituent ni une certification juridique ni une garantie d’acceptation. Les artefacts EN 16931 et Peppol sont exécutés dans le navigateur, sans envoi de la facture à un serveur. Le MVP ne vérifie pas encore la conformité PDF/A-3 du conteneur Factur-X, le statut TVA VIES, l’existence d’un participant dans le Peppol Directory ou les règles nationales supplémentaires ; ces contrôles devront être ajoutés par des connecteurs et artefacts versionnés lors d’un pilote réel.
+Les contrôles sont une aide à la préparation et ne constituent ni une certification juridique ni une garantie d’acceptation. Les artefacts EN 16931 et Peppol sont exécutés dans le navigateur, sans envoi de la facture à un serveur. VIES vérifie ponctuellement un statut TVA ; Peppol Directory indique une présence d’annuaire, pas la joignabilité SMP ni la capacité réelle à recevoir un document donné. Le MVP ne vérifie pas encore la conformité PDF/A-3 du conteneur Factur-X ni les règles nationales supplémentaires ; ces contrôles devront être ajoutés par des artefacts versionnés lors d’un pilote réel.

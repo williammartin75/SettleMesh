@@ -5,11 +5,12 @@ import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { authenticateApiKey, parseApiKeyConfiguration } from "./auth.mjs";
 import { validateApiInvoice } from "./validation.mjs";
+import { IdentityInputError, verifyPeppol, verifyVies } from "../worker/identity.mjs";
 
 export const API_VERSION = "v1";
 export const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
 
-const defaultRoot = fileURLToPath(new URL("../dist/", import.meta.url));
+const defaultRoot = fileURLToPath(new URL("../web/", import.meta.url));
 const types = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".pdf": "application/pdf"
@@ -82,12 +83,14 @@ export function createSettleMeshServer({
   root = defaultRoot,
   logger = console,
   rateLimit = 120,
-  apiKeys = parseApiKeyConfiguration()
+  apiKeys = parseApiKeyConfiguration(),
+  identityFetch = fetch
 } = {}) {
   const normalizedRoot = resolve(root);
   const credentials = parseApiKeyConfiguration(JSON.stringify(apiKeys));
   const consumeIpRate = createRateLimiter(60_000);
   const consumeOrganizationRate = createRateLimiter(60_000);
+  const consumePeppolRate = createRateLimiter(1_000);
   return createServer(async (request, response) => {
     const requestId = randomUUID();
     const url = new URL(request.url || "/", "http://localhost");
@@ -104,10 +107,40 @@ export function createSettleMeshServer({
         return jsonResponse(response, 200, {
           schema: "settlemesh-api-health", apiVersion: API_VERSION, status: "ok",
           validators: { en16931: "1.3.16", peppol: "3.0.21" },
-          authentication: { validate: "bearer-api-key", configured: credentials.length > 0 },
+          authentication: { validate: "bearer-api-key", identity: "same-origin", configured: credentials.length > 0 },
+          identitySources: { vies: "live", peppolDirectory: "live", persistence: false },
           limits: { requestBytes: MAX_API_BODY_BYTES, xmlBytes: 1024 * 1024, ipRequestsPerMinute: rateLimit },
           persistence: false
         }, ipRateHeaders);
+      }
+
+      if (["/api/v1/identity/vies", "/api/v1/identity/peppol"].includes(url.pathname)) {
+        if (request.method !== "POST") {
+          const error = apiError(requestId, "METHOD_NOT_ALLOWED", "Utilisez POST pour vérifier un identifiant.", 405);
+          return jsonResponse(response, error.status, error.body, { ...ipRateHeaders, Allow: "POST" });
+        }
+        if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+          const error = apiError(requestId, "UNSUPPORTED_MEDIA_TYPE", "Utilisez Content-Type: application/json.", 415);
+          return jsonResponse(response, error.status, error.body, ipRateHeaders);
+        }
+        if (url.pathname.endsWith("/peppol")) {
+          const upstreamRate = consumePeppolRate("peppol-directory", 2);
+          if (!upstreamRate.allowed) {
+            const error = apiError(requestId, "UPSTREAM_RATE_LIMITED", "Peppol Directory autorise deux recherches par seconde. Réessayez dans un instant.", 429);
+            return jsonResponse(response, error.status, error.body, rateHeaders(upstreamRate, 2, "peppol-directory"));
+          }
+        }
+        try {
+          const payload = await readJson(request);
+          const result = url.pathname.endsWith("/vies")
+            ? await verifyVies(payload, { fetchImpl: identityFetch })
+            : await verifyPeppol(payload?.participantId, { fetchImpl: identityFetch });
+          return jsonResponse(response, 200, { ...result, requestId }, ipRateHeaders);
+        } catch (error) {
+          const status = error instanceof IdentityInputError ? 400 : (error.statusCode || 500);
+          const failure = apiError(requestId, error.code || "IDENTITY_CHECK_FAILED", status >= 500 ? "La vérification a échoué." : error.message, status);
+          return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
+        }
       }
 
       if (url.pathname === "/api/v1/validate") {

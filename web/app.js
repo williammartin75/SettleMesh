@@ -15,6 +15,7 @@ import {
   validateInvoice
 } from "./core.js";
 import { extractFacturXXml } from "./facturx.js";
+import { checkPeppolIdentity, checkViesIdentity } from "./identity.js";
 import {
   exportLocalMetrics,
   normalizeLocalMetrics,
@@ -129,6 +130,7 @@ function setView(view, { updateHash = true } = {}) {
   document.body.classList.remove("menu-open");
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (view === "profile") fillProfileForm();
+  if (view === "sources") prefillIdentityForms();
 }
 
 function parseLocation() {
@@ -184,6 +186,36 @@ function renderProfileSurface(profile) {
   if (profile.requireBuyerReference) requirements.push(["BR", "Référence acheteur", "Obligatoire dans BT-10"]);
   if (profile.requireAttachment) requirements.push(["＋", "Pièce justificative", "À joindre lors de la soumission"]);
   $("#requirements-list").innerHTML = requirements.map(([icon, title, detail]) => `<div class="requirement"><span>${icon}</span><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></div></div>`).join("");
+}
+
+function prefillIdentityForms() {
+  const profile = state.profile;
+  const country = String(profile.country || "FR").toUpperCase();
+  const vat = String(profile.vatId || "").replace(/[\s.\-]/g, "").toUpperCase();
+  if ([...$("#vies-country").options].some((option) => option.value === country)) $("#vies-country").value = country;
+  $("#vies-number").value = vat.startsWith(country) ? vat.slice(country.length) : vat;
+  $("#peppol-number").value = profile.peppolId || "";
+}
+
+function renderIdentityResult(target, result) {
+  const status = result?.status || "unavailable";
+  const labels = {
+    loading: ["…", "Vérification en cours"],
+    verified: ["✓", "Vérifié"],
+    not_verified: ["!", "Non vérifié"],
+    unavailable: ["×", "Indisponible"]
+  };
+  const [icon, label] = labels[status] || labels.unavailable;
+  target.className = `identity-result ${status.replace("_", "-")}`;
+  target.querySelector(":scope > span").textContent = icon;
+  target.querySelector("strong").textContent = label;
+  const details = [result?.message];
+  if (result?.legalName) details.push(result.legalName);
+  if (result?.address) details.push(result.address);
+  if (result?.countryCode) details.push(`Pays : ${result.countryCode}`);
+  if (Number.isFinite(result?.acceptedDocumentTypes) && status === "verified") details.push(`${result.acceptedDocumentTypes} type(s) de document déclaré(s)`);
+  if (result?.checkedAt && status !== "loading") details.push(`Consulté le ${formatDate(result.checkedAt)}`);
+  target.querySelector("small").textContent = details.filter(Boolean).join("\n");
 }
 
 function renderDashboard() {
@@ -477,6 +509,42 @@ function setupEvents() {
   $("#copy-link").addEventListener("click", copyCheckLink);
   $("#preview-link").addEventListener("click", () => window.open(linkFor(state.profile), "_blank", "noopener"));
   $("#mobile-menu").addEventListener("click", () => document.body.classList.toggle("menu-open"));
+
+  $("#vies-check-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    form.setAttribute("aria-busy", "true");
+    renderIdentityResult($("#vies-result"), { status: "loading", message: "Interrogation de la Commission européenne…" });
+    try {
+      const result = await checkViesIdentity($("#vies-country").value, $("#vies-number").value);
+      renderIdentityResult($("#vies-result"), result);
+    } catch (error) {
+      renderIdentityResult($("#vies-result"), { status: error.status === 400 ? "not_verified" : "unavailable", message: error.message });
+    } finally {
+      button.disabled = false;
+      form.removeAttribute("aria-busy");
+    }
+  });
+
+  $("#peppol-check-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    form.setAttribute("aria-busy", "true");
+    renderIdentityResult($("#peppol-result"), { status: "loading", message: "Recherche exacte dans l’annuaire OpenPeppol…" });
+    try {
+      const result = await checkPeppolIdentity($("#peppol-number").value);
+      renderIdentityResult($("#peppol-result"), result);
+    } catch (error) {
+      renderIdentityResult($("#peppol-result"), { status: error.status === 400 ? "not_verified" : "unavailable", message: error.message });
+    } finally {
+      button.disabled = false;
+      form.removeAttribute("aria-busy");
+    }
+  });
 
   $("#profile-form").addEventListener("submit", (event) => {
     event.preventDefault();

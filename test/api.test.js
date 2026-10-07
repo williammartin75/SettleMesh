@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDemoXml, DEFAULT_PROFILE } from "../dist/core.js";
+import { createDemoXml, DEFAULT_PROFILE } from "../web/core.js";
 import { hashApiKey } from "../server/auth.mjs";
 import { createSettleMeshServer, listen, MAX_API_BODY_BYTES } from "../server/server.mjs";
 
@@ -125,6 +125,44 @@ test("reste fermé si aucune clé API n’est configurée", () => withServer(asy
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error.code, "AUTH_NOT_CONFIGURED");
 }, { apiKeys: [] }));
+
+test("vérifie VIES et Peppol sans clé API et sans persistance", () => withServer(async (baseUrl) => {
+  const vies = await fetch(`${baseUrl}/api/v1/identity/vies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ countryCode: "FR", vatNumber: "40303265045" })
+  });
+  const viesBody = await vies.json();
+  assert.equal(vies.status, 200);
+  assert.equal(viesBody.status, "verified");
+  assert.equal(viesBody.stored, false);
+  assert.equal(vies.headers.get("cache-control"), "no-store");
+
+  const peppol = await fetch(`${baseUrl}/api/v1/identity/peppol`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ participantId: "9930:de299939922" })
+  });
+  const peppolBody = await peppol.json();
+  assert.equal(peppol.status, 200);
+  assert.equal(peppolBody.status, "verified");
+  assert.equal(peppolBody.legalName, "ACME GmbH");
+}, {
+  identityFetch: async (url) => String(url).includes("vies")
+    ? new Response(JSON.stringify({ valid: true, name: "ACME SA" }), { status: 200, headers: { "Content-Type": "application/json" } })
+    : new Response(JSON.stringify({ "total-result-count": 1, matches: [{ entities: [{ name: [{ name: "ACME GmbH" }], countryCode: "DE" }], docTypes: [] }] }), { status: 200, headers: { "Content-Type": "application/json" } })
+}));
+
+test("refuse les entrées et méthodes invalides sur les vérifications d’identité", () => withServer(async (baseUrl) => {
+  const invalid = await fetch(`${baseUrl}/api/v1/identity/peppol`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantId: "incorrect" })
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).error.code, "INVALID_PEPPOL_ID");
+  const wrongMethod = await fetch(`${baseUrl}/api/v1/identity/vies`);
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get("allow"), "POST");
+}));
 
 test("isole le quota par organisation", () => {
   const keyA = "sm_test_organization_a_123456789012345";

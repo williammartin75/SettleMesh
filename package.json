@@ -1,13 +1,14 @@
 {
   "name": "settlemesh",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build:validator": "node scripts/build-validation-assets.mjs",
+    "build:site": "node scripts/build-site-worker.mjs",
     "api:key": "node scripts/create-api-key.mjs",
     "test": "node --test",
-    "check": "node --check dist/core.js && node --check dist/app.js && node --check dist/facturx.js && node --check dist/standards.js && node --check dist/netting.js && node --check dist/metrics.js && node --check dist/storage.js && node --check dist/svrl.js && node --check server/auth.mjs && node --check server/server.mjs && node --check server/validation.mjs && node --check scripts/create-api-key.mjs && node --check scripts/serve.mjs",
+    "check": "node --check web/core.js && node --check web/app.js && node --check web/identity.js && node --check web/facturx.js && node --check web/standards.js && node --check web/netting.js && node --check web/metrics.js && node --check web/storage.js && node --check web/svrl.js && node --check worker/identity.mjs && node --check worker/index.js && node --check server/auth.mjs && node --check server/server.mjs && node --check server/validation.mjs && node --check scripts/build-site-worker.mjs && node --check scripts/create-api-key.mjs && node --check scripts/serve.mjs",
     "serve": "node scripts/serve.mjs"
   },
   "devDependencies": {

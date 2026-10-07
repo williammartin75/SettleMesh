@@ -7,7 +7,7 @@ import {
   recordValidationRun,
   resetLocalMetrics,
   summarizeLocalMetrics
-} from "../dist/metrics.js";
+} from "../web/metrics.js";
 
 const NOW = "2026-10-07T10:00:00.000Z";
 

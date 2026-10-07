@@ -7,7 +7,7 @@ import {
   readPersistedState,
   STORAGE_KEY,
   writePersistedState
-} from "../dist/storage.js";
+} from "../web/storage.js";
 
 const createStorage = (entries = {}) => {
   const values = new Map(Object.entries(entries));

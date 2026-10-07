@@ -7,8 +7,8 @@ import {
   parseInvoiceXml,
   parseProfileBundle,
   validateInvoice
-} from "../dist/core.js";
-import { parseSvrl } from "../dist/svrl.js";
+} from "../web/core.js";
+import { parseSvrl } from "../web/svrl.js";
 
 class StrictDomParser extends DOMParser {
   constructor() {
@@ -20,7 +20,7 @@ class StrictDomParser extends DOMParser {
   }
 }
 
-const validationAsset = (name) => fileURLToPath(new URL(`../dist/validation/${name}`, import.meta.url));
+const validationAsset = (name) => fileURLToPath(new URL(`../web/validation/${name}`, import.meta.url));
 
 const STYLESHEETS = Object.freeze({
   ubl: validationAsset("en16931-ubl-1.3.16.sef.json"),

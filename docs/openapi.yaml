@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
-  title: SettleMesh Validation API
-  version: 1.1.0-pilot
+  title: SettleMesh Validation and Identity API
+  version: 1.2.0-pilot
   description: >-
     API pilote authentifiée de prévalidation UBL/CII. Elle n'est pas une certification
     juridique, ne conserve pas les factures et nécessite encore une infrastructure de
-    secrets, quotas et audit persistants avant une exposition Internet.
+    secrets, quotas et audit persistants avant une exposition Internet. Les routes
+    d'identité VIES et Peppol ne persistent pas les identifiants ni leurs réponses.
 servers:
   - url: http://127.0.0.1:4173/api/v1
     description: Serveur local
@@ -60,6 +61,56 @@ paths:
           $ref: '#/components/responses/ApiError'
         '503':
           $ref: '#/components/responses/ApiError'
+  /identity/vies:
+    post:
+      operationId: checkVatIdentity
+      summary: Vérifier ponctuellement un numéro de TVA auprès de VIES
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ViesRequest'
+      responses:
+        '200':
+          description: Résultat normalisé, y compris quand la source est indisponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityResponse'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '405':
+          $ref: '#/components/responses/ApiError'
+        '415':
+          $ref: '#/components/responses/ApiError'
+        '429':
+          $ref: '#/components/responses/ApiError'
+  /identity/peppol:
+    post:
+      operationId: checkPeppolIdentity
+      summary: Rechercher exactement un participant dans Peppol Directory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PeppolRequest'
+      responses:
+        '200':
+          description: Résultat normalisé, y compris quand la source est indisponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityResponse'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '405':
+          $ref: '#/components/responses/ApiError'
+        '415':
+          $ref: '#/components/responses/ApiError'
+        '429':
+          $ref: '#/components/responses/ApiError'
 components:
   securitySchemes:
     bearerAuth:
@@ -90,9 +141,10 @@ components:
             peppol: { type: string }
         authentication:
           type: object
-          required: [validate, configured]
+          required: [validate, identity, configured]
           properties:
             validate: { const: bearer-api-key }
+            identity: { const: same-origin }
             configured: { type: boolean }
         limits:
           type: object
@@ -101,6 +153,44 @@ components:
             xmlBytes: { type: integer }
             ipRequestsPerMinute: { type: integer }
         persistence: { const: false }
+    ViesRequest:
+      type: object
+      additionalProperties: false
+      required: [countryCode, vatNumber]
+      properties:
+        countryCode:
+          type: string
+          minLength: 2
+          maxLength: 2
+        vatNumber:
+          type: string
+          minLength: 2
+          maxLength: 24
+    PeppolRequest:
+      type: object
+      additionalProperties: false
+      required: [participantId]
+      properties:
+        participantId:
+          type: string
+          pattern: '^(iso6523-actorid-upis::)?[0-9]{4}:[A-Za-z0-9][A-Za-z0-9._+/:.-]{1,79}$'
+    IdentityResponse:
+      type: object
+      required: [schema, requestId, source, status, identifier, checkedAt, stored, message]
+      properties:
+        schema: { const: settlemesh-identity-check }
+        requestId: { type: string, format: uuid }
+        source: { enum: [VIES, Peppol Directory] }
+        status: { enum: [verified, not_verified, unavailable] }
+        identifier: { type: string }
+        checkedAt: { type: string, format: date-time }
+        stored: { const: false }
+        legalName: { type: [string, 'null'] }
+        address: { type: [string, 'null'] }
+        countryCode: { type: [string, 'null'] }
+        registeredOn: { type: [string, 'null'] }
+        acceptedDocumentTypes: { type: integer, minimum: 0 }
+        message: { type: string }
     ValidationRequest:
       type: object
       required: [xml]

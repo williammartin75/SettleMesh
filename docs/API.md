@@ -1,10 +1,12 @@
-# API SettleMesh Validation v1
+# API SettleMesh v1 — validation et identité européenne
 
-L'API v1 permet à un ERP, un logiciel de facturation ou une Plateforme Agréée d'envoyer une facture XML UBL/CII et de recevoir le même diagnostic structuré que SettleMesh CheckLink.
+L'API v1 permet à un ERP, un logiciel de facturation ou une Plateforme Agréée d'envoyer une facture XML UBL/CII et de recevoir le même diagnostic structuré que SettleMesh CheckLink. Elle expose aussi deux vérifications minimales utilisées par l’interface : VIES et Peppol Directory.
 
 ## Statut
 
-Cette API est un endpoint pilote exécutable localement. Elle est versionnée, testée et protégée par des clés Bearer rattachées à une organisation. Elle n'est pas déployée par l'hébergement statique du projet. Les clés et quotas étant encore configurés en mémoire, elle ne doit pas être exposée telle quelle sur Internet.
+La validation de factures est un endpoint pilote exécutable localement. Elle est versionnée, testée et protégée par des clés Bearer rattachées à une organisation. Elle n'est pas déployée avec le Site. Les clés et quotas étant encore configurés en mémoire, elle ne doit pas être exposée telle quelle sur Internet.
+
+Les routes d’identité ne reçoivent jamais de facture et ne nécessitent pas de clé dans le parcours navigateur same-origin. Le Site les exécute dans un Worker sans base de données : l’identifiant est transmis à la source officielle, la réponse normalisée est renvoyée puis oubliée. L’accès au Site reste contrôlé par sa politique d’audience.
 
 ## Démarrage
 
@@ -32,6 +34,8 @@ Le même serveur fournit ensuite :
 - l'application sur `http://127.0.0.1:4173/` ;
 - la santé de l'API sur `GET http://127.0.0.1:4173/api/v1/health` ;
 - la validation sur `POST http://127.0.0.1:4173/api/v1/validate`.
+- VIES sur `POST http://127.0.0.1:4173/api/v1/identity/vies` ;
+- Peppol Directory sur `POST http://127.0.0.1:4173/api/v1/identity/peppol`.
 
 Le port peut être changé avec la variable d'environnement `PORT`.
 
@@ -141,6 +145,43 @@ Invoke-RestMethod `
 
 `standards.complete` vaut `false` si le moteur officiel est indisponible. Dans ce cas, un avertissement est ajouté et le résultat ne peut pas devenir silencieusement « prêt ».
 
+## Vérifications d’identité
+
+VIES reçoit un pays et un numéro national, avec ou sans préfixe dans le champ `vatNumber` :
+
+```json
+{ "countryCode": "FR", "vatNumber": "40303265045" }
+```
+
+Peppol Directory reçoit l’identifiant complet `schéma:valeur` :
+
+```json
+{ "participantId": "9930:de299939922" }
+```
+
+Une réponse normalisée utilise toujours l’un des trois états suivants :
+
+- `verified` : la source a répondu positivement à cet instant ;
+- `not_verified` : la source a répondu mais n’a pas confirmé l’identifiant ;
+- `unavailable` : délai dépassé, erreur HTTP ou source inaccessible ; cet état ne doit jamais être interprété comme un succès ou un échec d’identité.
+
+```json
+{
+  "schema": "settlemesh-identity-check",
+  "requestId": "2c51c119-26cf-4eec-a763-827703766faa",
+  "source": "VIES",
+  "status": "verified",
+  "identifier": "FR40303265045",
+  "checkedAt": "2026-10-07T12:00:00.000Z",
+  "stored": false,
+  "legalName": "ACME SA",
+  "address": "Paris",
+  "message": "Numéro déclaré valide par VIES au moment de la requête."
+}
+```
+
+Pour Peppol, la réponse peut aussi contenir le pays, la date d’inscription et le nombre de types de documents déclarés. Elle n’expose pas les contacts ni la liste brute des capacités. Une présence dans le Directory n’est ni une preuve de joignabilité SMP ni une garantie de livraison.
+
 ## Erreurs
 
 Toutes les erreurs suivent ce format :
@@ -160,6 +201,7 @@ Toutes les erreurs suivent ce format :
 | HTTP | Code principal | Signification |
 |---:|---|---|
 | 400 | `INVALID_JSON` | Corps JSON non lisible |
+| 400 | `INVALID_VAT_COUNTRY`, `INVALID_VAT_NUMBER`, `INVALID_PEPPOL_ID` | Identifiant européen hors contrat |
 | 401 | `AUTH_REQUIRED`, `INVALID_API_KEY` | Clé absente ou invalide |
 | 404 | `NOT_FOUND` | Route API inconnue |
 | 405 | `METHOD_NOT_ALLOWED` | Méthode HTTP non prise en charge |
@@ -167,6 +209,7 @@ Toutes les erreurs suivent ce format :
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | `Content-Type` différent de JSON |
 | 422 | `XML_REQUIRED`, `INVALID_XML`, `UNSAFE_XML`, `INVALID_PROFILE` | Données métier invalides ou DOCTYPE refusé |
 | 429 | `RATE_LIMITED` | Limite de débit atteinte |
+| 429 | `UPSTREAM_RATE_LIMITED` | Limite officielle de Peppol Directory atteinte |
 | 500 | `VALIDATION_FAILED` | Erreur interne non prévue |
 | 503 | `AUTH_NOT_CONFIGURED` | Aucune clé n'est configurée côté serveur |
 
@@ -186,6 +229,9 @@ Toutes les erreurs suivent ce format :
 - organisation dérivée de la clé côté serveur, sans faire confiance au corps de requête ;
 - fermeture par défaut de la validation si aucune clé n'est configurée ;
 - pas de CORS ouvert par défaut ;
+- vérifications d’identité déclenchées explicitement, sans cache ni persistance ;
+- délai amont de 8 secondes et état `unavailable` distinct d’un résultat négatif ;
+- limite Peppol Directory de deux recherches par seconde appliquée au mieux par processus ou isolate ;
 - en-têtes `nosniff`, `no-referrer` et permissions sensibles désactivées ;
 - aucun compte utilisateur, rôle, session, journal d'audit persistant ni SLA dans cette version locale.
 

@@ -38,7 +38,7 @@
         <span class="trust-icon">◎</span>
         <div><strong>Analyse locale</strong><small>Les factures restent dans ce navigateur.</small></div>
       </div>
-      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.8</strong></div>
+      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.9</strong></div>
     </aside>
 
     <main class="main">
@@ -239,14 +239,43 @@
         </section>
 
         <section class="view" data-view="sources">
-          <div class="section-intro"><div><span class="section-label">Transparence</span><h2>Des règles vérifiables,<br>pas une boîte noire.</h2><p>Le MVP sépare les contrôles déterministes, les données externes et les recommandations à confirmer.</p></div></div>
+          <div class="section-intro"><div><span class="section-label">Transparence</span><h2>Vérifiez l’identité.<br>Gardez la preuve lisible.</h2><p>SettleMesh interroge VIES et Peppol Directory à la demande, puis distingue le résultat officiel des règles de facture et des exigences de l’acheteur.</p></div></div>
+
+          <article class="panel identity-panel">
+            <div class="panel-head identity-head"><div><span class="section-label">Sources européennes · en direct</span><h3>Vérifier une entreprise</h3><p>Chaque vérification est déclenchée manuellement. L’identifiant transite vers la source officielle, puis la réponse est affichée sans être enregistrée par SettleMesh.</p></div><span class="identity-privacy">◎ Sans historique serveur</span></div>
+            <div class="identity-grid">
+              <form class="identity-check-card" id="vies-check-form">
+                <div class="identity-card-title"><span class="source-icon vies">V</span><div><strong>Numéro de TVA</strong><small>Commission européenne · VIES</small></div></div>
+                <div class="identity-fields split">
+                  <label><span>Pays</span><select id="vies-country" name="countryCode" aria-label="Pays du numéro de TVA"><option>AT</option><option>BE</option><option>BG</option><option>CY</option><option>CZ</option><option>DE</option><option>DK</option><option>EE</option><option>EL</option><option>ES</option><option>FI</option><option selected>FR</option><option>HR</option><option>HU</option><option>IE</option><option>IT</option><option>LT</option><option>LU</option><option>LV</option><option>MT</option><option>NL</option><option>PL</option><option>PT</option><option>RO</option><option>SE</option><option>SI</option><option>SK</option><option>XI</option></select></label>
+                  <label><span>Numéro</span><input id="vies-number" name="vatNumber" autocomplete="off" placeholder="40303265045" required></label>
+                </div>
+                <button class="button primary full" type="submit">Vérifier via VIES</button>
+                <div class="identity-result idle" id="vies-result" aria-live="polite"><span>—</span><div><strong>Non vérifié</strong><small>Lancez une vérification pour obtenir un état horodaté.</small></div></div>
+                <a href="https://ec.europa.eu/taxation_customs/vies/" target="_blank" rel="noreferrer">Consulter VIES directement ↗</a>
+              </form>
+
+              <form class="identity-check-card" id="peppol-check-form">
+                <div class="identity-card-title"><span class="source-icon peppol">P</span><div><strong>Participant Peppol</strong><small>OpenPeppol · Directory</small></div></div>
+                <div class="identity-fields">
+                  <label><span>Identifiant complet</span><input id="peppol-number" name="participantId" autocomplete="off" placeholder="9930:de299939922" required></label>
+                </div>
+                <button class="button primary full" type="submit">Rechercher dans Peppol</button>
+                <div class="identity-result idle" id="peppol-result" aria-live="polite"><span>—</span><div><strong>Non vérifié</strong><small>La présence dans le Directory ne garantit pas la livraison d’une facture.</small></div></div>
+                <a href="https://directory.peppol.eu/public" target="_blank" rel="noreferrer">Consulter le Directory directement ↗</a>
+              </form>
+            </div>
+            <p class="identity-disclaimer">Un résultat « vérifié » reflète uniquement la réponse de la source à cet instant. Ce n’est ni une certification d’entreprise, ni un avis juridique, ni une garantie de joignabilité ou d’acceptation.</p>
+          </article>
+
           <div class="source-grid">
             <article class="source-card active-source"><div class="source-icon">EU</div><span class="source-state">Artefact officiel actif</span><h3>EN 16931 v1.3.16</h3><p>Les XSLT officiels UBL et CII sont exécutés localement dans le navigateur, en plus des exigences de l’acheteur.</p><a href="https://github.com/ConnectingEurope/eInvoicing-EN16931/releases/tag/validation-1.3.16" target="_blank" rel="noreferrer">Voir l’artefact officiel ↗</a></article>
             <article class="source-card active-source"><div class="source-icon peppol">P</div><span class="source-state">Règles actives</span><h3>Peppol BIS 3.0.21</h3><p>Les factures UBL déclarant un profil Peppol sont aussi contrôlées avec le Schematron OpenPeppol.</p><a href="https://docs.peppol.eu/poacc/billing/3.0/" target="_blank" rel="noreferrer">Voir la spécification ↗</a></article>
-            <article class="source-card"><div class="source-icon vies">V</div><span class="source-state prepared">Connecteur préparé</span><h3>VIES</h3><p>Validation future du statut TVA directement auprès du service de la Commission.</p><a href="https://ec.europa.eu/taxation_customs/vies/" target="_blank" rel="noreferrer">Ouvrir VIES ↗</a></article>
+            <article class="source-card active-source"><div class="source-icon vies">V</div><span class="source-state">Connecteur actif</span><h3>VIES</h3><p>Validation à la demande du numéro de TVA auprès du service de la Commission européenne, sans mise en cache.</p><a href="https://ec.europa.eu/taxation_customs/vies/" target="_blank" rel="noreferrer">Ouvrir VIES ↗</a></article>
+            <article class="source-card active-source"><div class="source-icon peppol">PD</div><span class="source-state">Connecteur actif</span><h3>Peppol Directory</h3><p>Recherche exacte d’un participant déclaré dans l’annuaire OpenPeppol ; cette présence ne prouve pas sa joignabilité SMP.</p><a href="https://directory.peppol.eu/public/menuitem-docs-rest-api" target="_blank" rel="noreferrer">Voir l’API officielle ↗</a></article>
             <article class="source-card"><div class="source-icon profile-source">◎</div><span class="source-state">Actif dans le MVP</span><h3>Règles de l’acheteur</h3><p>Entité, adresse électronique, devises et références internes configurées dans CheckLink.</p><button class="source-link" type="button" data-route="profile">Modifier les règles →</button></article>
           </div>
-          <article class="panel boundary-card"><div><span class="section-label">Périmètre du prototype</span><h3>Ce que signifie un résultat SettleMesh</h3></div><p>SettleMesh CheckLink exécute les artefacts indiqués et les règles du destinataire, mais le résultat n’est ni un avis juridique ni une garantie d’acceptation par une administration, un client ou une plateforme agréée. La validité TVA VIES et la joignabilité Peppol Directory restent des connecteurs distincts.</p></article>
+          <article class="panel boundary-card"><div><span class="section-label">Périmètre du prototype</span><h3>Ce que signifie un résultat SettleMesh</h3></div><p>SettleMesh CheckLink exécute les artefacts indiqués et les règles du destinataire. VIES confirme un statut TVA ponctuel ; Peppol Directory confirme une présence d’annuaire. Aucun de ces résultats n’est un avis juridique ni une garantie d’acceptation par une administration, un client ou une plateforme agréée.</p></article>
         </section>
       </div>
     </main>

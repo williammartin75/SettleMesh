@@ -18,7 +18,7 @@ import {
   profileSlug,
   resultSummary,
   validateInvoice
-} from "../dist/core.js";
+} from "../web/core.js";
 
 test("refuse un DOCTYPE avant le parsing XML dans le navigateur", () => {
   const malicious = '<!DOCTYPE Invoice [<!ENTITY secret SYSTEM "file:///etc/passwd">]><Invoice>&secret;</Invoice>';
