@@ -13,6 +13,10 @@ MVP de prévalidation des factures électroniques européennes. Une entreprise c
 - contrôles du destinataire, de la TVA, de l’adresse électronique, du numéro de commande et des totaux ;
 - diagnostic détaillé avec références EN 16931 `BT-*` ;
 - rapport téléchargeable et historique local ;
+- contrôle en lot de 20 factures avec synthèse consolidée ;
+- exports de rapports lisibles, JSON et CSV pour intégration dans un workflow ;
+- recherche et filtrage de l’historique local ;
+- export et import sécurisé du profil de réception ;
 - interface fournisseur utilisable sans compte ;
 - aucune transmission ou conservation serveur des factures dans ce MVP.
 
@@ -33,6 +37,10 @@ Dans **Tester une facture**, utiliser :
 
 - **Exemple avec erreurs** pour observer la mauvaise entité, la TVA incorrecte, l’adresse de réception différente et l’absence de commande ;
 - **Exemple conforme** pour obtenir un résultat prêt à envoyer.
+
+Il est aussi possible de déposer jusqu’à 20 fichiers en une fois. Le tableau de synthèse ouvre ensuite le diagnostic détaillé de chaque facture et s’exporte en CSV.
+
+Dans **Mon CheckLink**, le profil peut être exporté en JSON puis réimporté dans un autre navigateur. Dans **Contrôles**, l’historique peut être recherché, filtré et exporté en CSV.
 
 ## Périmètre
 

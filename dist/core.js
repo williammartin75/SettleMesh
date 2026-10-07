@@ -39,6 +39,7 @@ const number = (value) => {
 
 const cleanId = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const textEncoder = new TextEncoder();
+let resultSequence = 0;
 const electronicAddress = (scope, localName) => {
   const element = node(scope, localName);
   const value = element?.textContent?.trim() || "";
@@ -93,6 +94,57 @@ export function decodeProfile(value) {
   } catch {
     return null;
   }
+}
+
+const PROFILE_BUNDLE_SCHEMA = "eurule-checklink-profile";
+const SUPPORTED_FORMATS = ["UBL", "CII", "FACTUR-X"];
+
+export function createProfileBundle(profile) {
+  const normalized = decodeProfile(encodeProfile(profile));
+  return {
+    schema: PROFILE_BUNDLE_SCHEMA,
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    profile: normalized
+  };
+}
+
+export function parseProfileBundle(value) {
+  let payload;
+  try {
+    payload = typeof value === "string" ? JSON.parse(value) : value;
+  } catch {
+    throw new Error("Le fichier de profil n’est pas un JSON valide.");
+  }
+  if (!payload || typeof payload !== "object") throw new Error("Le profil importé est vide.");
+  if (payload.schema && payload.schema !== PROFILE_BUNDLE_SCHEMA) throw new Error("Ce fichier n’est pas un profil Eurule compatible.");
+  const source = payload.profile && typeof payload.profile === "object" ? payload.profile : payload;
+  const companyName = String(source.companyName || "").trim();
+  const legalName = String(source.legalName || "").trim();
+  const vatId = String(source.vatId || "").trim().toUpperCase();
+  const acceptedFormats = [...new Set((Array.isArray(source.acceptedFormats) ? source.acceptedFormats : [])
+    .map((item) => String(item).trim().toUpperCase()).filter((item) => SUPPORTED_FORMATS.includes(item)))];
+  const acceptedCurrencies = [...new Set((Array.isArray(source.acceptedCurrencies) ? source.acceptedCurrencies : [])
+    .map((item) => String(item).trim().toUpperCase()).filter((item) => /^[A-Z]{3}$/.test(item)))];
+  if (!companyName || !legalName || !vatId) throw new Error("Le nom, la raison sociale et le numéro de TVA sont obligatoires.");
+  if (!acceptedFormats.length) throw new Error("Le profil doit accepter au moins un format pris en charge.");
+  if (!acceptedCurrencies.length) throw new Error("Le profil doit contenir au moins une devise ISO à trois lettres.");
+  return {
+    companyName,
+    legalName,
+    country: String(source.country || "FR").trim().toUpperCase().slice(0, 2),
+    vatId,
+    peppolId: String(source.peppolId || "").trim(),
+    routingProvider: String(source.routingProvider || "").trim(),
+    acceptedFormats,
+    acceptedCurrencies,
+    requirePurchaseOrder: source.requirePurchaseOrder === true,
+    requireBuyerReference: source.requireBuyerReference === true,
+    requireEndpoint: source.requireEndpoint === true,
+    requireAttachment: source.requireAttachment === true,
+    submissionEmail: String(source.submissionEmail || "").trim(),
+    instructions: String(source.instructions || "").trim()
+  };
 }
 
 export function createCheckLink(profile, locationLike = globalThis.location) {
@@ -261,7 +313,7 @@ export function validateInvoice(invoice, profile = DEFAULT_PROFILE) {
     : check("lines", "warning", "Aucune ligne détectée", "Le document ne contient pas de ligne de facturation reconnue.", "Ajoutez au moins une ligne de bien ou service.", "BG-25"));
 
   return recalculateResult({
-    id: `CHK-${Date.now().toString(36).toUpperCase()}`, checkedAt: new Date().toISOString(), checks,
+    id: `CHK-${Date.now().toString(36).toUpperCase()}-${(++resultSequence).toString(36).toUpperCase()}`, checkedAt: new Date().toISOString(), checks,
     invoice: { ...invoice, raw: undefined }, recipient: profile.companyName
   });
 }
@@ -319,4 +371,45 @@ export function exportResultText(result) {
     ...result.checks.map((item) => `${item.status === "pass" ? "✓" : item.status === "error" ? "✕" : "!"} ${item.title}${item.fix ? ` — ${item.fix}` : ""}`),
     "", "Rapport d’aide à la préparation — ne constitue pas une certification juridique."
   ].join("\n");
+}
+
+export function exportResultJson(result) {
+  return JSON.stringify({
+    schema: "eurule-validation-report",
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    result
+  }, null, 2);
+}
+
+const csvCell = (value) => {
+  const raw = String(value ?? "");
+  const safe = /^[\t\r\n ]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replace(/"/g, '""')}"`;
+};
+
+export function exportHistoryCsv(history) {
+  const columns = [
+    ["checked_at", (item) => item.checkedAt],
+    ["check_id", (item) => item.id],
+    ["invoice_number", (item) => item.invoice?.invoiceNumber],
+    ["document_type", (item) => item.invoice?.documentType],
+    ["format", (item) => item.invoice?.container === "FACTUR-X" ? "FACTUR-X" : item.invoice?.syntax],
+    ["supplier", (item) => item.invoice?.supplierName],
+    ["supplier_vat", (item) => item.invoice?.supplierVat],
+    ["recipient", (item) => item.recipient],
+    ["currency", (item) => item.invoice?.currency],
+    ["payable_amount", (item) => item.invoice?.payableAmount],
+    ["outcome", (item) => item.outcome],
+    ["score", (item) => item.score],
+    ["errors", (item) => item.counts?.error || 0],
+    ["warnings", (item) => item.counts?.warning || 0],
+    ["en16931", (item) => item.standards?.en16931],
+    ["peppol", (item) => item.standards?.peppol]
+  ];
+  const rows = [columns.map(([name]) => csvCell(name)).join(";")];
+  for (const item of Array.isArray(history) ? history : []) {
+    rows.push(columns.map(([, read]) => csvCell(read(item))).join(";"));
+  }
+  return `\ufeff${rows.join("\r\n")}`;
 }

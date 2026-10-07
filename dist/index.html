@@ -36,7 +36,7 @@
         <span class="trust-icon">◎</span>
         <div><strong>Analyse locale</strong><small>Les factures restent dans ce navigateur.</small></div>
       </div>
-      <div class="sidebar-footer"><span>MVP fonctionnel</span><strong>v0.1</strong></div>
+      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.2</strong></div>
     </aside>
 
     <main class="main">
@@ -129,7 +129,7 @@
             </div>
 
             <aside class="profile-side">
-              <article class="panel sticky-card"><span class="section-label">Lien généré</span><h3>Prêt à être partagé</h3><p>Ajoutez-le à vos bons de commande, signatures et instructions fournisseurs.</p><div class="share-preview"><span id="side-avatar">AN</span><div><strong id="side-company">Atelier Nova</strong><small>Vérification avant envoi</small></div></div><div class="link-box compact"><code id="side-link">—</code></div><button class="button lime full" type="button" data-copy-link>Copier le CheckLink</button><button class="button ghost full" type="button" data-route="checker">Ouvrir l’aperçu</button><small class="legal-note">Le lien transporte uniquement les exigences de réception. Aucun document n’est publié.</small></article>
+              <article class="panel sticky-card"><span class="section-label">Lien généré</span><h3>Prêt à être partagé</h3><p>Ajoutez-le à vos bons de commande, signatures et instructions fournisseurs.</p><div class="share-preview"><span id="side-avatar">AN</span><div><strong id="side-company">Atelier Nova</strong><small>Vérification avant envoi</small></div></div><div class="link-box compact"><code id="side-link">—</code></div><button class="button lime full" type="button" data-copy-link>Copier le CheckLink</button><button class="button ghost full" type="button" data-route="checker">Ouvrir l’aperçu</button><div class="profile-transfer"><button class="button ghost" id="export-profile" type="button">Exporter le profil</button><button class="button ghost" id="import-profile" type="button">Importer</button><input id="profile-import-file" type="file" accept="application/json,.json" hidden></div><small class="legal-note">Le lien et l’export contiennent uniquement les exigences de réception. Aucune facture n’est publiée.</small></article>
             </aside>
           </form>
         </section>
@@ -143,7 +143,7 @@
           <div class="checker-layout">
             <article class="panel upload-panel" id="upload-panel">
               <div class="upload-icon">↥</div><h3>Déposez votre facture structurée</h3><p>Le contrôle s’effectue dans ce navigateur. Votre facture n’est ni transmise ni archivée.</p>
-              <div class="drop-area" id="drop-area" tabindex="0" role="button"><input id="invoice-file" type="file" accept=".xml,.ubl,.cii,.pdf,application/xml,text/xml,application/pdf" hidden><strong>Glissez un fichier ici</strong><span>XML UBL / CII ou PDF Factur-X · 20 Mo max.</span></div>
+              <div class="drop-area" id="drop-area" tabindex="0" role="button"><input id="invoice-file" type="file" multiple accept=".xml,.ubl,.cii,.pdf,application/xml,text/xml,application/pdf" hidden><strong>Glissez une ou plusieurs factures ici</strong><span>XML UBL / CII ou PDF Factur-X · 20 fichiers · 20 Mo max. par fichier</span></div>
               <div class="validation-progress" id="validation-progress" hidden><span class="progress-spinner" aria-hidden="true"></span><div><strong>Contrôle en cours</strong><small id="validation-progress-text">Lecture de la facture…</small></div></div>
               <div class="upload-divider"><span>ou tester maintenant</span></div>
               <div class="sample-actions"><button class="button secondary" id="demo-invalid" type="button">Exemple avec erreurs</button><button class="button ghost" id="demo-valid" type="button">Exemple conforme</button></div>
@@ -159,6 +159,12 @@
             </article>
           </div>
 
+          <article class="panel batch-panel" id="batch-panel" hidden>
+            <div class="panel-head"><div><span class="section-label">Contrôle en lot</span><h3 id="batch-title">Résultats du lot</h3></div><button class="button ghost" id="batch-export" type="button">Exporter le lot en CSV</button></div>
+            <div class="batch-metrics" id="batch-metrics"></div>
+            <div class="batch-list" id="batch-list"></div>
+          </article>
+
           <article class="result-area" id="result-area" hidden>
             <div class="result-summary" id="result-summary"></div>
             <div class="result-grid"><div class="checks-list" id="checks-list"></div><aside class="result-side" id="result-side"></aside></div>
@@ -166,8 +172,8 @@
         </section>
 
         <section class="view" data-view="history">
-          <div class="section-intro"><div><span class="section-label">Historique local</span><h2>Chaque contrôle,<br>une action claire.</h2><p>Suivez les résultats réalisés depuis ce navigateur et retrouvez les corrections proposées.</p></div><button class="button ghost" id="clear-history" type="button">Effacer l’historique</button></div>
-          <article class="panel history-panel"><div class="history-header"><span>Facture</span><span>Fournisseur</span><span>Résultat</span><span>Score</span><span>Date</span></div><div id="history-list"></div><div class="empty-state" id="history-empty"><span>✓</span><h3>Aucun contrôle pour le moment</h3><p>Testez une facture pour voir son diagnostic apparaître ici.</p><button class="button primary" type="button" data-route="checker">Tester une facture</button></div></article>
+          <div class="section-intro"><div><span class="section-label">Historique local</span><h2>Chaque contrôle,<br>une action claire.</h2><p>Suivez les résultats réalisés depuis ce navigateur et retrouvez les corrections proposées.</p></div><div class="history-actions"><button class="button secondary" id="export-history" type="button">Exporter CSV</button><button class="button ghost" id="clear-history" type="button">Effacer l’historique</button></div></div>
+          <article class="panel history-panel"><div class="history-toolbar"><label><span>Rechercher</span><input id="history-search" type="search" placeholder="Facture, fournisseur, TVA…"></label><label><span>Résultat</span><select id="history-outcome"><option value="all">Tous</option><option value="ready">Prêtes</option><option value="review">À vérifier</option><option value="blocked">À corriger</option></select></label></div><div class="history-header"><span>Facture</span><span>Fournisseur</span><span>Résultat</span><span>Score</span><span>Date</span></div><div id="history-list"></div><div class="empty-state" id="history-empty"><span>✓</span><h3>Aucun contrôle pour le moment</h3><p>Testez une facture pour voir son diagnostic apparaître ici.</p><button class="button primary" type="button" data-route="checker">Tester une facture</button></div></article>
         </section>
 
         <section class="view" data-view="sources">

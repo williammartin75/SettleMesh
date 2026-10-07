@@ -3,8 +3,12 @@ import {
   appendValidationChecks,
   createCheckLink,
   createDemoXml,
+  createProfileBundle,
   decodeProfile,
+  exportHistoryCsv,
+  exportResultJson,
   exportResultText,
+  parseProfileBundle,
   parseInvoiceXml,
   profileCompleteness,
   resultSummary,
@@ -33,7 +37,7 @@ function loadState() {
     if (profile.vatId === "FR40123456789") profile.vatId = DEFAULT_PROFILE.vatId;
     return {
       profile,
-      history: Array.isArray(saved?.history) ? saved.history.slice(0, 50) : [],
+      history: Array.isArray(saved?.history) ? saved.history.slice(0, 100) : [],
       lastResult: saved?.lastResult || null
     };
   } catch {
@@ -44,6 +48,9 @@ function loadState() {
 const state = loadState();
 let publicProfile = null;
 let currentView = "overview";
+let currentBatch = [];
+let historyQuery = "";
+let historyOutcome = "all";
 
 function activeProfile() { return publicProfile || state.profile; }
 function initials(name) { return String(name || "EU").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase(); }
@@ -216,8 +223,37 @@ function profileFromForm(form) {
 function renderHistory() {
   const list = $("#history-list");
   const empty = $("#history-empty");
-  empty.hidden = state.history.length > 0;
-  list.innerHTML = state.history.map((item) => `<div class="history-row"><div><strong>${escapeHtml(item.invoice.invoiceNumber || "Sans numéro")}</strong><small>${escapeHtml(item.invoice.syntax || "XML")} · ${escapeHtml(item.recipient)}</small></div><div><strong>${escapeHtml(item.invoice.supplierName || "Inconnu")}</strong><small>${escapeHtml(item.invoice.supplierVat || "TVA non lue")}</small></div><span class="result-tag ${item.outcome}">${escapeHtml(resultSummary(item).label)}</span><div class="score-bar"><i style="--score:${item.score}%"></i><strong>${item.score}</strong></div><small>${formatDate(item.checkedAt)}</small></div>`).join("");
+  const query = historyQuery.trim().toLocaleLowerCase("fr");
+  const filtered = state.history.filter((item) => {
+    if (historyOutcome !== "all" && item.outcome !== historyOutcome) return false;
+    if (!query) return true;
+    return [item.id, item.invoice?.invoiceNumber, item.invoice?.supplierName, item.invoice?.supplierVat, item.recipient]
+      .some((value) => String(value || "").toLocaleLowerCase("fr").includes(query));
+  });
+  empty.hidden = filtered.length > 0;
+  $("h3", empty).textContent = state.history.length ? "Aucun résultat correspondant" : "Aucun contrôle pour le moment";
+  $("p", empty).textContent = state.history.length ? "Modifiez la recherche ou le filtre de résultat." : "Testez une facture pour voir son diagnostic apparaître ici.";
+  list.innerHTML = filtered.map((item) => `<div class="history-row"><div><strong>${escapeHtml(item.invoice.invoiceNumber || "Sans numéro")}</strong><small>${escapeHtml(item.invoice.syntax || "XML")} · ${escapeHtml(item.recipient)}</small></div><div><strong>${escapeHtml(item.invoice.supplierName || "Inconnu")}</strong><small>${escapeHtml(item.invoice.supplierVat || "TVA non lue")}</small></div><span class="result-tag ${item.outcome}">${escapeHtml(resultSummary(item).label)}</span><div class="score-bar"><i style="--score:${item.score}%"></i><strong>${item.score}</strong></div><small>${formatDate(item.checkedAt)}</small></div>`).join("");
+}
+
+function renderBatchResults(entries) {
+  currentBatch = entries;
+  const panel = $("#batch-panel");
+  panel.hidden = false;
+  const completed = entries.filter((entry) => entry.result);
+  const ready = completed.filter((entry) => entry.result.outcome === "ready").length;
+  const review = completed.filter((entry) => entry.result.outcome === "review").length;
+  const blocked = completed.filter((entry) => entry.result.outcome === "blocked").length;
+  const failed = entries.length - completed.length;
+  $("#batch-title").textContent = `${entries.length} facture${entries.length > 1 ? "s" : ""} traitée${entries.length > 1 ? "s" : ""}`;
+  $("#batch-metrics").innerHTML = [
+    ["Total", entries.length], ["Prêtes", ready], ["À vérifier", review], ["À corriger", blocked], ["Non lues", failed]
+  ].map(([label, value]) => `<div class="batch-metric"><span>${label}</span><strong>${value}</strong></div>`).join("");
+  $("#batch-list").innerHTML = entries.map((entry) => {
+    if (!entry.result) return `<div class="batch-row failed"><div><strong>${escapeHtml(entry.name)}</strong><small>${escapeHtml(entry.error)}</small></div><div></div><span class="result-tag blocked">Non analysée</span><span class="score">—</span></div>`;
+    const result = entry.result;
+    return `<button class="batch-row" type="button" data-batch-result="${escapeHtml(result.id)}"><div><strong>${escapeHtml(entry.name)}</strong><small>${escapeHtml(result.invoice.invoiceNumber || "Sans numéro")}</small></div><div><strong>${escapeHtml(result.invoice.supplierName || "Fournisseur inconnu")}</strong><small>${escapeHtml(result.invoice.currency || "Devise inconnue")}</small></div><span class="result-tag ${result.outcome}">${escapeHtml(resultSummary(result).label)}</span><span class="score">${result.score}/100</span></button>`;
+  }).join("");
 }
 
 function renderResult(result) {
@@ -227,32 +263,47 @@ function renderResult(result) {
   $("#result-summary").className = `result-summary ${result.outcome}`;
   $("#result-summary").innerHTML = `<div><span class="section-label">${escapeHtml(result.id)}</span><h3>${escapeHtml(summary.label)}</h3><p>${escapeHtml(summary.headline)}</p></div><div class="score-orb"><strong>${result.score}</strong><span>sur 100</span></div>`;
   $("#checks-list").innerHTML = result.checks.map((item) => `<article class="check-row ${item.status}"><span class="check-status">${item.status === "pass" ? "✓" : item.status === "error" ? "×" : item.status === "warning" ? "!" : "i"}</span><div><h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.message)}</p>${item.fix ? `<div class="fix"><strong>Comment corriger :</strong> ${escapeHtml(item.fix)}</div>` : ""}</div><span class="field-code">${escapeHtml(item.field)}</span></article>`).join("");
-  $("#result-side").innerHTML = `<span class="section-label">Document analysé</span><h3>${escapeHtml(result.invoice.invoiceNumber || "Sans numéro")}</h3><div class="result-fact"><span>Fournisseur</span><strong>${escapeHtml(result.invoice.supplierName || "Non lu")}</strong></div><div class="result-fact"><span>Destinataire</span><strong>${escapeHtml(result.invoice.buyerName || "Non lu")}</strong></div><div class="result-fact"><span>Format</span><strong>${escapeHtml(result.invoice.container === "FACTUR-X" ? "Factur-X · CII" : result.invoice.syntax)}</strong></div><div class="result-fact"><span>Norme</span><strong>EN 16931 ${escapeHtml(result.standards?.en16931 || "précontrôle")}</strong></div><div class="result-fact"><span>Montant</span><strong>${result.invoice.payableAmount != null ? `${result.invoice.payableAmount.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} ${escapeHtml(result.invoice.currency)}` : "Non lu"}</strong></div><button class="button primary full" type="button" id="download-report">Télécharger le rapport</button><button class="button ghost full" type="button" id="new-check">Contrôler une autre facture</button><p class="disclaimer">Validation automatisée des artefacts indiqués, complétée par les exigences du destinataire. Ne constitue pas un avis juridique.</p>`;
+  $("#result-side").innerHTML = `<span class="section-label">Document analysé</span><h3>${escapeHtml(result.invoice.invoiceNumber || "Sans numéro")}</h3><div class="result-fact"><span>Fournisseur</span><strong>${escapeHtml(result.invoice.supplierName || "Non lu")}</strong></div><div class="result-fact"><span>Destinataire</span><strong>${escapeHtml(result.invoice.buyerName || "Non lu")}</strong></div><div class="result-fact"><span>Format</span><strong>${escapeHtml(result.invoice.container === "FACTUR-X" ? "Factur-X · CII" : result.invoice.syntax)}</strong></div><div class="result-fact"><span>Norme</span><strong>EN 16931 ${escapeHtml(result.standards?.en16931 || "précontrôle")}</strong></div><div class="result-fact"><span>Montant</span><strong>${result.invoice.payableAmount != null ? `${result.invoice.payableAmount.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} ${escapeHtml(result.invoice.currency)}` : "Non lu"}</strong></div><button class="button primary full" type="button" id="download-report">Rapport lisible</button><button class="button secondary full" type="button" id="download-json-report">Rapport JSON</button><button class="button ghost full" type="button" id="new-check">Contrôler une autre facture</button><p class="disclaimer">Validation automatisée des artefacts indiqués, complétée par les exigences du destinataire. Ne constitue pas un avis juridique.</p>`;
   $("#download-report").addEventListener("click", () => download(`eurule-${result.invoice.invoiceNumber || result.id}.txt`, exportResultText(result)));
+  $("#download-json-report").addEventListener("click", () => download(`eurule-${result.invoice.invoiceNumber || result.id}.json`, exportResultJson(result), "application/json;charset=utf-8"));
   $("#new-check").addEventListener("click", () => { area.hidden = true; $("#upload-panel").scrollIntoView({ behavior: "smooth" }); });
   area.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function buildValidationResult(xmlText, source = {}, progressPrefix = "") {
+  const invoice = { ...parseInvoiceXml(xmlText), ...source };
+  let result = validateInvoice(invoice, activeProfile());
+  setValidationProgress(true, `${progressPrefix}${invoice.syntax === "UBL" ? "Validation EN 16931 et Peppol…" : "Validation EN 16931…"}`);
+  try {
+    const official = await validateEuropeanStandard(xmlText, invoice);
+    result = appendValidationChecks(result, official.checks, official.metadata);
+  } catch (standardError) {
+    result = appendValidationChecks(result, [{
+      id: "official-validator-unavailable", status: "warning", title: "Validation officielle indisponible",
+      message: standardError.message || "Le moteur officiel n’a pas répondu.",
+      fix: "Relancez le contrôle avec une connexion stable.", field: "EN 16931"
+    }], { en16931: null, peppol: null, officialFailures: null });
+  }
+  return result;
+}
+
+function saveResults(results) {
+  if (!results.length) return;
+  state.lastResult = results[0];
+  state.history.unshift(...results);
+  state.history = state.history.slice(0, 100);
+  persist();
+  renderDashboard();
+  renderHistory();
 }
 
 async function analyze(xmlText, source = {}) {
   try {
     setValidationProgress(true, "Lecture de la facture…");
-    const invoice = { ...parseInvoiceXml(xmlText), ...source };
-    let result = validateInvoice(invoice, activeProfile());
-    setValidationProgress(true, invoice.syntax === "UBL" ? "Validation EN 16931 et Peppol…" : "Validation EN 16931…");
-    try {
-      const official = await validateEuropeanStandard(xmlText, invoice);
-      result = appendValidationChecks(result, official.checks, official.metadata);
-    } catch (standardError) {
-      result = appendValidationChecks(result, [{
-        id: "official-validator-unavailable", status: "warning", title: "Validation officielle indisponible",
-        message: standardError.message || "Le moteur officiel n’a pas répondu.",
-        fix: "Relancez le contrôle avec une connexion stable.", field: "EN 16931"
-      }], { en16931: null, peppol: null, officialFailures: null });
-    }
-    state.lastResult = result;
-    state.history.unshift(result);
-    state.history = state.history.slice(0, 50);
-    persist(); renderResult(result); renderDashboard(); renderHistory();
+    const result = await buildValidationResult(xmlText, source);
+    saveResults([result]);
+    $("#batch-panel").hidden = true;
+    renderResult(result);
     toast("Contrôle terminé", resultSummary(result).headline);
   } catch (error) {
     toast("Fichier non analysé", error.message || "Le document ne peut pas être lu.");
@@ -261,23 +312,59 @@ async function analyze(xmlText, source = {}) {
   }
 }
 
-async function analyzeFile(file) {
-  if (!file) return;
-  if (file.size > 20 * 1024 * 1024) return toast("Fichier trop volumineux", "La limite est fixée à 20 Mo.");
+async function readInvoiceFile(file) {
+  if (!file) throw new Error("Aucun fichier sélectionné.");
+  if (file.size > 20 * 1024 * 1024) throw new Error("Le fichier dépasse la limite de 20 Mo.");
   const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
   if (isPdf) {
-    setValidationProgress(true, "Extraction du XML Factur-X…");
-    try {
-      const extracted = await extractFacturXXml(file);
-      await analyze(extracted.xmlText, { container: extracted.container, attachmentName: extracted.attachmentName, originalFileName: file.name });
-    } catch (error) {
-      toast("Factur-X non analysé", error.message || "Le XML embarqué n’a pas pu être extrait.");
-      setValidationProgress(false);
-    }
-    return;
+    const extracted = await extractFacturXXml(file);
+    return { xmlText: extracted.xmlText, source: { container: extracted.container, attachmentName: extracted.attachmentName, originalFileName: file.name } };
   }
-  if (!/\.(xml|ubl|cii)$/i.test(file.name) && !/xml/i.test(file.type)) return toast("Format non pris en charge", "Utilisez un XML UBL/CII ou un PDF Factur-X.");
-  await analyze(await file.text(), { container: "XML", originalFileName: file.name });
+  if (!/\.(xml|ubl|cii)$/i.test(file.name) && !/xml/i.test(file.type)) throw new Error("Format non pris en charge. Utilisez XML UBL/CII ou PDF Factur-X.");
+  return { xmlText: await file.text(), source: { container: "XML", originalFileName: file.name } };
+}
+
+async function analyzeFiles(fileList) {
+  const selected = [...(fileList || [])];
+  if (!selected.length) return;
+  const files = selected.slice(0, 20);
+  if (selected.length > files.length) toast("Lot limité à 20 fichiers", `${selected.length - files.length} fichier(s) n’ont pas été traités.`);
+  const entries = [];
+  setValidationProgress(true, `Préparation de ${files.length} fichier${files.length > 1 ? "s" : ""}…`);
+  try {
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const prefix = files.length > 1 ? `${index + 1}/${files.length} · ` : "";
+      setValidationProgress(true, `${prefix}${/\.pdf$/i.test(file.name) ? "Extraction Factur-X…" : "Lecture du XML…"}`);
+      try {
+        const payload = await readInvoiceFile(file);
+        const result = await buildValidationResult(payload.xmlText, payload.source, prefix);
+        entries.push({ name: file.name, result });
+      } catch (error) {
+        entries.push({ name: file.name, error: error.message || "Document non analysable." });
+      }
+    }
+    const results = entries.flatMap((entry) => entry.result ? [entry.result] : []);
+    saveResults(results);
+    if (files.length === 1) {
+      if (results.length === 1) {
+        $("#batch-panel").hidden = true;
+        renderResult(results[0]);
+        toast("Contrôle terminé", resultSummary(results[0]).headline);
+      } else {
+        $("#result-area").hidden = true;
+        renderBatchResults(entries);
+        toast("Fichier non analysé", entries[0].error);
+      }
+    } else {
+      $("#result-area").hidden = true;
+      renderBatchResults(entries);
+      $("#batch-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+      toast("Lot terminé", `${results.length}/${files.length} facture(s) analysée(s).`);
+    }
+  } finally {
+    setValidationProgress(false);
+  }
 }
 
 function renderAll() {
@@ -291,6 +378,11 @@ function setupEvents() {
     const route = event.target.closest("[data-route]")?.dataset.route;
     if (route) { event.preventDefault(); setView(route); }
     if (event.target.closest("[data-copy-link]")) copyCheckLink();
+    const resultId = event.target.closest("[data-batch-result]")?.dataset.batchResult;
+    if (resultId) {
+      const result = currentBatch.find((entry) => entry.result?.id === resultId)?.result;
+      if (result) renderResult(result);
+    }
   });
   $("#copy-link").addEventListener("click", copyCheckLink);
   $("#preview-link").addEventListener("click", () => window.open(linkFor(state.profile), "_blank", "noopener"));
@@ -304,19 +396,55 @@ function setupEvents() {
     $("#save-status").textContent = `Enregistré à ${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
     toast("CheckLink actualisé", "Les nouvelles exigences sont intégrées au lien.");
   });
+  $("#export-profile").addEventListener("click", () => {
+    const name = state.profile.companyName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "entreprise";
+    download(`eurule-profil-${name}.json`, JSON.stringify(createProfileBundle(state.profile), null, 2), "application/json;charset=utf-8");
+    toast("Profil exporté", "Le fichier peut être sauvegardé ou transféré à un collègue.");
+  });
+  $("#import-profile").addEventListener("click", () => $("#profile-import-file").click());
+  $("#profile-import-file").addEventListener("change", async (event) => {
+    const file = event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 100 * 1024) return toast("Profil non importé", "Le fichier dépasse la limite de 100 Ko.");
+    try {
+      state.profile = parseProfileBundle(await file.text());
+      persist(); renderAll(); fillProfileForm();
+      toast("Profil importé", `Le CheckLink de ${state.profile.companyName} est prêt.`);
+    } catch (error) {
+      toast("Profil non importé", error.message || "Le fichier n’est pas compatible.");
+    }
+  });
 
   const drop = $("#drop-area");
   drop.addEventListener("click", () => $("#invoice-file").click());
   drop.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") $("#invoice-file").click(); });
   ["dragenter", "dragover"].forEach((name) => drop.addEventListener(name, (event) => { event.preventDefault(); drop.classList.add("dragging"); }));
   ["dragleave", "drop"].forEach((name) => drop.addEventListener(name, (event) => { event.preventDefault(); drop.classList.remove("dragging"); }));
-  drop.addEventListener("drop", (event) => analyzeFile(event.dataTransfer.files[0]));
-  $("#invoice-file").addEventListener("change", (event) => analyzeFile(event.target.files[0]));
+  drop.addEventListener("drop", (event) => analyzeFiles(event.dataTransfer.files));
+  $("#invoice-file").addEventListener("change", (event) => { analyzeFiles(event.target.files); event.target.value = ""; });
   $("#demo-invalid").addEventListener("click", () => analyze(createDemoXml({ valid: false, profile: activeProfile() }), { container: "XML", originalFileName: "demo-erreurs.xml" }));
   $("#demo-valid").addEventListener("click", () => analyze(createDemoXml({ valid: true, profile: activeProfile() }), { container: "XML", originalFileName: "demo-conforme.xml" }));
   $("#paste-toggle").addEventListener("click", () => { $("#paste-box").hidden = !$("#paste-box").hidden; });
   $("#analyze-pasted").addEventListener("click", () => analyze($("#xml-input").value, { container: "XML", originalFileName: "xml-colle.xml" }));
-  $("#clear-history").addEventListener("click", () => { state.history = []; state.lastResult = null; persist(); renderDashboard(); renderHistory(); toast("Historique effacé", "Les contrôles locaux ont été supprimés."); });
+  $("#batch-export").addEventListener("click", () => {
+    const results = currentBatch.flatMap((entry) => entry.result ? [entry.result] : []);
+    if (!results.length) return toast("Aucun résultat à exporter", "Le lot ne contient aucune facture analysée.");
+    download(`eurule-lot-${new Date().toISOString().slice(0, 10)}.csv`, exportHistoryCsv(results), "text/csv;charset=utf-8");
+  });
+  $("#export-history").addEventListener("click", () => {
+    if (!state.history.length) return toast("Historique vide", "Effectuez au moins un contrôle avant l’export.");
+    download(`eurule-historique-${new Date().toISOString().slice(0, 10)}.csv`, exportHistoryCsv(state.history), "text/csv;charset=utf-8");
+  });
+  $("#history-search").addEventListener("input", (event) => { historyQuery = event.target.value; renderHistory(); });
+  $("#history-outcome").addEventListener("change", (event) => { historyOutcome = event.target.value; renderHistory(); });
+  $("#clear-history").addEventListener("click", () => {
+    if (!state.history.length) return toast("Historique déjà vide");
+    if (!window.confirm("Effacer définitivement l’historique enregistré dans ce navigateur ?")) return;
+    state.history = []; state.lastResult = null; currentBatch = []; persist(); renderDashboard(); renderHistory();
+    $("#batch-panel").hidden = true; $("#result-area").hidden = true;
+    toast("Historique effacé", "Les contrôles locaux ont été supprimés.");
+  });
   window.addEventListener("hashchange", parseLocation);
 }
 

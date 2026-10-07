@@ -215,6 +215,8 @@ fieldset { margin: 0; padding: 0; border: 0; }
 .share-preview strong { font-size: 11px; }
 .share-preview small { margin-top: 2px; color: #97a2b2; font-size: 8px; }
 .sticky-card .button { margin-top: 8px; }
+.profile-transfer { display: grid; grid-template-columns: 1.25fr .75fr; gap: 8px; margin-top: 3px; }
+.profile-transfer .button { min-width: 0; padding: 0 10px; font-size: 9px; }
 .legal-note { display: block; margin-top: 15px; color: var(--muted-2); font-size: 8px; line-height: 1.55; text-align: center; }
 
 .checker-view { max-width: 1120px; margin: 0 auto; }
@@ -258,6 +260,23 @@ fieldset { margin: 0; padding: 0; border: 0; }
 .instructions-box > span { width: 20px; height: 20px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #fff; font-size: 10px; font-weight: 900; }
 .instructions-box p { margin: 1px 0 0; font-size: 9px; line-height: 1.55; }
 .result-area { margin-top: 19px; }
+.batch-panel { margin-top: 18px; padding: 24px; }
+.batch-metrics { display: grid; grid-template-columns: repeat(5,1fr); gap: 9px; margin: 18px 0; }
+.batch-metric { padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: #f8f9fb; }
+.batch-metric span, .batch-metric strong { display: block; }
+.batch-metric span { color: var(--muted); font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; }
+.batch-metric strong { margin-top: 5px; font-size: 20px; }
+.batch-list { border: 1px solid var(--line); border-radius: 13px; overflow: hidden; }
+.batch-row { width: 100%; display: grid; grid-template-columns: minmax(0,1.25fr) minmax(0,1fr) auto auto; gap: 12px; align-items: center; padding: 13px 14px; border: 0; border-top: 1px solid var(--line); background: #fff; text-align: left; }
+.batch-row:first-child { border-top: 0; }
+button.batch-row { cursor: pointer; }
+button.batch-row:hover { background: #f8f9fb; }
+.batch-row strong, .batch-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-row strong { font-size: 10px; }
+.batch-row small { margin-top: 3px; color: var(--muted-2); font-size: 8px; }
+.batch-row .score { min-width: 44px; color: var(--muted); font-size: 9px; font-weight: 800; text-align: right; }
+.batch-row.failed { background: var(--red-soft); }
+.batch-row.failed .result-tag { justify-self: end; }
 .result-summary { padding: 25px 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-radius: 19px; background: var(--ink); color: #fff; }
 .result-summary.ready { background: #123c2d; }
 .result-summary.review { background: #4b3619; }
@@ -288,6 +307,10 @@ fieldset { margin: 0; padding: 0; border: 0; }
 .result-side .disclaimer { margin: 13px 0 0; color: var(--muted-2); font-size: 8px; line-height: 1.5; text-align: center; }
 
 .history-panel { padding-top: 15px; }
+.history-actions { display: flex; gap: 9px; }
+.history-toolbar { display: grid; grid-template-columns: minmax(220px,1fr) 190px; gap: 12px; padding: 0 15px 15px; }
+.history-toolbar label { margin: 0; }
+.history-toolbar input, .history-toolbar select { background: #f8f9fb; }
 .history-header, .history-row { display: grid; grid-template-columns: 1.2fr 1fr .75fr .45fr .8fr; gap: 12px; align-items: center; }
 .history-header { padding: 0 15px 12px; color: var(--muted-2); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .history-row { padding: 15px; border-top: 1px solid #edf0f3; font-size: 10px; }
@@ -356,6 +379,8 @@ body.public-mode .checker-header::before { content: "eurule"; position: absolute
   .checker-header { align-items: flex-start; flex-direction: column; }
   .accepted-pills { justify-content: flex-start; }
   .history-header { display: none; }
+  .batch-row { grid-template-columns: minmax(0,1fr) auto; }
+  .batch-row > :nth-child(2), .batch-row > :nth-child(4) { display: none; }
   .history-row { grid-template-columns: 1fr auto; }
   .history-row > :nth-child(2), .history-row > :nth-child(4), .history-row > :nth-child(5) { display: none; }
   .source-grid { grid-template-columns: 1fr; }
@@ -375,6 +400,11 @@ body.public-mode .checker-header::before { content: "eurule"; position: absolute
   .recent-row { grid-template-columns: 1fr auto; }
   .recent-row > :nth-child(2), .recent-row > :nth-child(4) { display: none; }
   .form-actions { align-items: stretch; flex-direction: column; }
+  .history-actions { width: 100%; }
+  .history-actions .button { flex: 1; }
+  .history-toolbar { grid-template-columns: 1fr; }
+  .batch-metrics { grid-template-columns: 1fr 1fr; }
+  .batch-panel .panel-head { align-items: stretch; flex-direction: column; }
   .sample-actions { align-items: stretch; flex-direction: column; }
   .upload-panel { padding: 24px 18px; }
   .result-summary { align-items: flex-start; }

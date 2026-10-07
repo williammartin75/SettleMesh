@@ -5,9 +5,13 @@ import {
   appendValidationChecks,
   createCheckLink,
   createDemoXml,
+  createProfileBundle,
   decodeProfile,
+  exportHistoryCsv,
+  exportResultJson,
   encodeProfile,
   exportResultText,
+  parseProfileBundle,
   profileCompleteness,
   profileSlug,
   resultSummary,
@@ -20,6 +24,15 @@ test("encode et décode un profil CheckLink", () => {
   assert.equal(decoded.vatId, DEFAULT_PROFILE.vatId);
   assert.deepEqual(decoded.acceptedFormats, DEFAULT_PROFILE.acceptedFormats);
   assert.equal(decoded.requirePurchaseOrder, true);
+});
+
+test("exporte et réimporte un profil portable validé", () => {
+  const bundle = createProfileBundle(DEFAULT_PROFILE);
+  const imported = parseProfileBundle(JSON.stringify(bundle));
+  assert.equal(bundle.schema, "eurule-checklink-profile");
+  assert.equal(imported.companyName, DEFAULT_PROFILE.companyName);
+  assert.deepEqual(imported.acceptedFormats, DEFAULT_PROFILE.acceptedFormats);
+  assert.throws(() => parseProfileBundle('{"profile":{"companyName":"Incomplet"}}'), /obligatoires/);
 });
 
 test("génère un slug et un lien partageable", () => {
@@ -69,6 +82,16 @@ test("produit un rapport lisible", () => {
   assert.match(text, /EURULE CHECKLINK/);
   assert.match(text, /INV-3/);
   assert.match(text, /Score/);
+  const json = JSON.parse(exportResultJson(result));
+  assert.equal(json.schema, "eurule-validation-report");
+  assert.equal(json.result.invoice.invoiceNumber, "INV-3");
+
+  const csv = exportHistoryCsv([result]);
+  assert.match(csv, /invoice_number/);
+  assert.match(csv, /INV-3/);
+  assert.match(csv, /ready/);
+  const protectedCsv = exportHistoryCsv([{ ...result, invoice: { ...result.invoice, supplierName: "=HYPERLINK(\"https://example.test\")" } }]);
+  assert.match(protectedCsv, /'=HYPERLINK/);
 });
 
 test("les exemples UBL reflètent les exigences du profil", () => {
