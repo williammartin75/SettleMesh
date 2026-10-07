@@ -2,6 +2,8 @@
 
 MVP de prévalidation des factures électroniques européennes. Une entreprise configure son profil de réception et partage un CheckLink avec ses fournisseurs. Ceux-ci contrôlent leur facture UBL, CII ou Factur-X avant transmission et reçoivent des corrections formulées en langage simple.
 
+Le périmètre produit, l'état de chaque module, les invariants, les risques et la feuille de route sont centralisés dans [`PROJECT_DASHBOARD.md`](./PROJECT_DASHBOARD.md). Toute modification du dépôt est soumise à la règle de contrôle définie dans [`AGENTS.md`](./AGENTS.md).
+
 ## Fonctionnalités
 
 - configuration de l’entité destinataire, de son numéro de TVA et de son identifiant Peppol ;
