@@ -15,6 +15,7 @@ import {
   validateInvoice
 } from "./core.js";
 import { extractFacturXXml } from "./facturx.js";
+import { createNettingDemo, exportNettingCsv, nettingCsvTemplate, parseNettingCsv, simulateNetting } from "./netting.js";
 import { validateEuropeanStandard } from "./standards.js";
 
 const STORAGE_KEY = "eurule-checklink-v1";
@@ -22,6 +23,7 @@ const TITLES = {
   overview: ["CHECKLINK", "Vue d’ensemble"],
   profile: ["CONFIGURATION", "Mon CheckLink"],
   checker: ["PRÉVALIDATION", "Tester une facture"],
+  netting: ["TRÉSORERIE", "SettleMesh Net"],
   history: ["DIAGNOSTICS", "Contrôles"],
   sources: ["TRANSPARENCE", "Sources & règles"]
 };
@@ -38,10 +40,14 @@ function loadState() {
     return {
       profile,
       history: Array.isArray(saved?.history) ? saved.history.slice(0, 100) : [],
-      lastResult: saved?.lastResult || null
+      lastResult: saved?.lastResult || null,
+      netting: {
+        obligations: Array.isArray(saved?.netting?.obligations) ? saved.netting.obligations.slice(0, 500) : [],
+        source: saved?.netting?.source || ""
+      }
     };
   } catch {
-    return { profile: clone(DEFAULT_PROFILE), history: [], lastResult: null };
+    return { profile: clone(DEFAULT_PROFILE), history: [], lastResult: null, netting: { obligations: [], source: "" } };
   }
 }
 
@@ -51,6 +57,7 @@ let currentView = "overview";
 let currentBatch = [];
 let historyQuery = "";
 let historyOutcome = "all";
+let currentNettingSimulation = null;
 
 function activeProfile() { return publicProfile || state.profile; }
 function initials(name) { return String(name || "EU").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase(); }
@@ -58,7 +65,7 @@ function formatDate(value) { return new Intl.DateTimeFormat("fr-FR", { dateStyle
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]); }
 
 function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ profile: state.profile, history: state.history, lastResult: state.lastResult }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ profile: state.profile, history: state.history, lastResult: state.lastResult, netting: state.netting }));
 }
 
 function toast(title, detail = "") {
@@ -256,6 +263,55 @@ function renderBatchResults(entries) {
   }).join("");
 }
 
+function formatMoney(value, currency = "EUR") {
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency, maximumFractionDigits: 2 }).format(Number(value) || 0);
+}
+
+function renderNetting() {
+  const obligations = state.netting?.obligations || [];
+  const results = $("#netting-results");
+  if (!obligations.length) {
+    currentNettingSimulation = null;
+    results.hidden = true;
+    $("#netting-source p").textContent = "Aucun registre chargé. La démonstration contient cinq factures éligibles et une facture en litige.";
+    return;
+  }
+
+  const simulation = simulateNetting(obligations);
+  currentNettingSimulation = simulation;
+  results.hidden = false;
+  const currencySummary = (field) => simulation.metricsByCurrency.map((item) => formatMoney(item[field], item.currency)).join(" + ") || "0 €";
+  $("#netting-gross").textContent = currencySummary("grossVolume");
+  $("#netting-offset").textContent = currencySummary("nettedVolume");
+  $("#netting-residual").textContent = currencySummary("residualVolume");
+  $("#netting-invoices").textContent = `${simulation.eligible.length} facture${simulation.eligible.length > 1 ? "s éligibles" : " éligible"}`;
+  $("#netting-rate").textContent = simulation.metricsByCurrency.length === 1
+    ? `${simulation.metricsByCurrency[0].nettingRate.toLocaleString("fr-FR")} % du volume`
+    : simulation.metricsByCurrency.map((item) => `${item.currency} ${item.nettingRate.toLocaleString("fr-FR")} %`).join(" · ");
+  $("#netting-transfers").textContent = simulation.metrics.transfersAvoided;
+  $("#netting-transfer-detail").textContent = `${simulation.metrics.transfersBefore} avant · ${simulation.metrics.transfersAfter} après`;
+  $("#netting-ignored").textContent = `${simulation.ignored.length} facture${simulation.ignored.length > 1 ? "s exclues" : " exclue"}`;
+  $("#netting-source p").textContent = `${state.netting.source || "Registre local"} · ${obligations.length} ligne${obligations.length > 1 ? "s" : ""} · calcul effectué dans ce navigateur.`;
+
+  $("#netting-proposals").innerHTML = simulation.proposals.length ? simulation.proposals.map((proposal) => {
+    const label = proposal.type === "bilateral" ? "Bilatérale" : "Cycle à 3";
+    const path = proposal.type === "bilateral" ? proposal.parties.join(" ↔ ") : `${proposal.parties.join(" → ")} → ${proposal.parties[0]}`;
+    const legs = proposal.legs.map((item) => `<div class="proposal-leg"><span>${escapeHtml(item.from)}</span><span>→</span><span>${escapeHtml(item.to)}</span><strong>${escapeHtml(formatMoney(item.amount, proposal.currency))}</strong></div>`).join("");
+    const invoices = [...new Set(proposal.legs.flatMap((item) => item.allocations.map((allocation) => allocation.invoiceNumber)))].join(", ");
+    return `<article class="netting-proposal"><div class="proposal-top"><div><span class="proposal-type">${label}</span><h4>${escapeHtml(path)}</h4></div><div class="proposal-value"><strong>${escapeHtml(formatMoney(proposal.grossReduction, proposal.currency))}</strong><small>volume brut réduit</small></div></div><div class="proposal-legs">${legs}</div><p class="proposal-note">Factures mobilisées : ${escapeHtml(invoices)} · accord de toutes les parties requis.</p></article>`;
+  }).join("") : `<div class="empty-inline">Aucune boucle compensable détectée dans ce registre.</div>`;
+
+  $("#netting-positions").innerHTML = simulation.positions.map((position) => `<div class="netting-position"><div><strong>${escapeHtml(position.name)}</strong><small>${escapeHtml(position.currency)} · à recevoir ${escapeHtml(formatMoney(position.receivable, position.currency))} · à payer ${escapeHtml(formatMoney(position.payable, position.currency))}</small></div><span class="${position.netPosition >= 0 ? "positive" : "negative"}">${position.netPosition >= 0 ? "+" : "−"}${escapeHtml(formatMoney(Math.abs(position.netPosition), position.currency))}</span></div>`).join("");
+  $("#netting-residuals").innerHTML = simulation.residuals.length ? simulation.residuals.map((item) => `<div class="residual-row"><strong>${escapeHtml(item.debtor)}</strong><span>→</span><strong>${escapeHtml(item.creditor)}</strong><strong>${escapeHtml(formatMoney(item.remainingAmount, item.currency))}</strong></div>`).join("") : `<div class="empty-inline">Aucun paiement résiduel dans la simulation.</div>`;
+}
+
+function applyNettingObligations(obligations, source) {
+  state.netting = { obligations: obligations.slice(0, 500), source };
+  persist();
+  renderNetting();
+  if (currentView === "netting") $("#netting-results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function renderResult(result) {
   const summary = resultSummary(result);
   const area = $("#result-area");
@@ -371,6 +427,7 @@ function renderAll() {
   renderProfileSurface(activeProfile());
   renderDashboard();
   renderHistory();
+  renderNetting();
 }
 
 function setupEvents() {
@@ -444,6 +501,35 @@ function setupEvents() {
     state.history = []; state.lastResult = null; currentBatch = []; persist(); renderDashboard(); renderHistory();
     $("#batch-panel").hidden = true; $("#result-area").hidden = true;
     toast("Historique effacé", "Les contrôles locaux ont été supprimés.");
+  });
+
+  const nettingDrop = $("#netting-drop");
+  const importNettingFile = async (file) => {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) return toast("Registre non importé", "La limite du CSV est fixée à 2 Mo.");
+    try {
+      const parsed = parseNettingCsv(await file.text());
+      const rejected = parsed.rejected.length ? ` · ${parsed.rejected.length} ligne(s) non lisible(s)` : "";
+      applyNettingObligations(parsed.obligations, `${file.name}${rejected}`);
+      toast("Registre analysé", `${parsed.obligations.length} obligation(s) exploitable(s).`);
+    } catch (error) {
+      toast("Registre non importé", error.message || "Le CSV n’est pas compatible.");
+    }
+  };
+  nettingDrop.addEventListener("click", () => $("#netting-file").click());
+  nettingDrop.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); $("#netting-file").click(); } });
+  ["dragenter", "dragover"].forEach((name) => nettingDrop.addEventListener(name, (event) => { event.preventDefault(); nettingDrop.classList.add("dragging"); }));
+  ["dragleave", "drop"].forEach((name) => nettingDrop.addEventListener(name, (event) => { event.preventDefault(); nettingDrop.classList.remove("dragging"); }));
+  nettingDrop.addEventListener("drop", (event) => importNettingFile(event.dataTransfer.files[0]));
+  $("#netting-file").addEventListener("change", (event) => { importNettingFile(event.target.files[0]); event.target.value = ""; });
+  $("#netting-demo").addEventListener("click", () => {
+    applyNettingObligations(createNettingDemo(), "Réseau de démonstration");
+    toast("Simulation prête", "Les compensations bilatérale et triangulaire ont été calculées.");
+  });
+  $("#netting-template").addEventListener("click", () => download("settlemesh-modele-compensation.csv", `\ufeff${nettingCsvTemplate()}`, "text/csv;charset=utf-8"));
+  $("#netting-export").addEventListener("click", () => {
+    if (!currentNettingSimulation?.proposals.length) return toast("Aucune proposition à exporter", "Chargez un registre contenant des dettes réciproques.");
+    download(`settlemesh-propositions-${new Date().toISOString().slice(0, 10)}.csv`, exportNettingCsv(currentNettingSimulation), "text/csv;charset=utf-8");
   });
   window.addEventListener("hashchange", parseLocation);
 }

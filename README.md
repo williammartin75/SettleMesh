@@ -17,6 +17,10 @@ MVP de prévalidation des factures électroniques européennes. Une entreprise c
 - exports de rapports lisibles, JSON et CSV pour intégration dans un workflow ;
 - recherche et filtrage de l’historique local ;
 - export et import sécurisé du profil de réception ;
+- simulation de compensation bilatérale et triangulaire entre entreprises avec SettleMesh Net ;
+- import d’un registre de factures en CSV, exclusion des créances litigieuses ou cédées et séparation stricte par devise ;
+- calcul du volume compensable, des positions nettes et des paiements résiduels ;
+- export CSV des propositions de compensation et des factures mobilisées ;
 - interface fournisseur utilisable sans compte ;
 - aucune transmission ou conservation serveur des factures dans ce MVP.
 
@@ -41,6 +45,18 @@ Dans **Tester une facture**, utiliser :
 Il est aussi possible de déposer jusqu’à 20 fichiers en une fois. Le tableau de synthèse ouvre ensuite le diagnostic détaillé de chaque facture et s’exporte en CSV.
 
 Dans **Mon CheckLink**, le profil peut être exporté en JSON puis réimporté dans un autre navigateur. Dans **Contrôles**, l’historique peut être recherché, filtré et exporté en CSV.
+
+## SettleMesh Net
+
+La page **SettleMesh Net** contient un réseau de démonstration et accepte un registre CSV utilisant les colonnes suivantes :
+
+```text
+invoice_number;debtor;creditor;amount;currency;due_date;status;disputed;assigned
+```
+
+Le moteur regroupe les obligations par devise, compense d’abord les dettes bilatérales, puis détecte les cycles triangulaires. Il conserve la position nette de chaque participant et exporte les propositions avec l’allocation aux factures d’origine.
+
+Cette fonctionnalité est une simulation d’aide à la décision. Elle ne déplace aucun fonds, n’initie aucun paiement et ne constate pas juridiquement l’extinction des créances. Toute mise en production nécessite notamment un accord entre les parties et une validation juridique, comptable et fiscale.
 
 ## Périmètre
 

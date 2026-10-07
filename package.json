@@ -1,12 +1,12 @@
 {
   "name": "eurule-checklink",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build:validator": "node scripts/build-validation-assets.mjs",
     "test": "node --test",
-    "check": "node --check dist/core.js && node --check dist/app.js && node --check dist/facturx.js && node --check dist/standards.js",
+    "check": "node --check dist/core.js && node --check dist/app.js && node --check dist/facturx.js && node --check dist/standards.js && node --check dist/netting.js",
     "serve": "node scripts/serve.mjs"
   },
   "devDependencies": {

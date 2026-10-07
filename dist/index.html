@@ -27,6 +27,7 @@
         <button class="nav-item active" type="button" data-route="overview"><span class="nav-icon">⌂</span>Vue d’ensemble</button>
         <button class="nav-item" type="button" data-route="profile"><span class="nav-icon">◇</span>Mon CheckLink <span class="nav-pill" id="profile-score-pill">—</span></button>
         <button class="nav-item" type="button" data-route="checker"><span class="nav-icon">✓</span>Tester une facture</button>
+        <button class="nav-item" type="button" data-route="netting"><span class="nav-icon">⇄</span>SettleMesh Net <span class="nav-pill new-pill">Nouveau</span></button>
         <button class="nav-item" type="button" data-route="history"><span class="nav-icon">↻</span>Contrôles <span class="nav-pill" id="history-count-pill">0</span></button>
         <button class="nav-item" type="button" data-route="sources"><span class="nav-icon">⌁</span>Sources & règles</button>
       </nav>
@@ -36,7 +37,7 @@
         <span class="trust-icon">◎</span>
         <div><strong>Analyse locale</strong><small>Les factures restent dans ce navigateur.</small></div>
       </div>
-      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.2</strong></div>
+      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.3</strong></div>
     </aside>
 
     <main class="main">
@@ -72,6 +73,11 @@
             <article class="metric"><span>Factures prêtes</span><strong id="metric-ready">0</strong><small id="metric-ready-rate">Aucun contrôle</small></article>
             <article class="metric accent"><span>Anomalies évitées</span><strong id="metric-errors">0</strong><small>avant transmission</small></article>
           </div>
+
+          <article class="netting-banner">
+            <div><span class="section-label">Nouveau · Upsell trésorerie</span><h3>Transformez les factures validées en cash économisé.</h3><p>SettleMesh Net détecte les dettes réciproques et les cycles de compensation entre partenaires, sans déplacer de fonds.</p></div>
+            <button class="button lime" type="button" data-route="netting">Simuler une compensation <span>→</span></button>
+          </article>
 
           <div class="dashboard-grid">
             <article class="panel readiness-panel">
@@ -169,6 +175,46 @@
             <div class="result-summary" id="result-summary"></div>
             <div class="result-grid"><div class="checks-list" id="checks-list"></div><aside class="result-side" id="result-side"></aside></div>
           </article>
+        </section>
+
+        <section class="view" data-view="netting">
+          <div class="section-intro netting-intro"><div><span class="section-label">SettleMesh Net · Simulation</span><h2>Payez seulement<br>ce qui reste.</h2><p>Importez un registre de factures acceptées. Le moteur détecte les compensations bilatérales et triangulaires possibles, sans initier de paiement.</p></div><span class="status-badge simulation"><i></i> Aucun mouvement de fonds</span></div>
+
+          <div class="netting-layout">
+            <article class="panel netting-input-panel">
+              <div class="form-section-title"><span>01</span><div><h3>Charger les obligations</h3><p>Une ligne par facture client ou fournisseur.</p></div></div>
+              <div class="netting-drop" id="netting-drop" tabindex="0" role="button"><input id="netting-file" type="file" accept=".csv,text/csv" hidden><span>⇄</span><div><strong>Importer un registre CSV</strong><small>Débiteur, créancier, montant, devise, échéance et statut · 2 Mo max.</small></div></div>
+              <div class="netting-input-actions"><button class="button primary" id="netting-demo" type="button">Charger le réseau démo</button><button class="button ghost" id="netting-template" type="button">Télécharger le modèle CSV</button></div>
+              <div class="netting-source" id="netting-source"><span>i</span><p>Aucun registre chargé. La démonstration contient cinq factures éligibles et une facture en litige.</p></div>
+            </article>
+
+            <article class="panel netting-rules-panel">
+              <div class="form-section-title"><span>02</span><div><h3>Garde-fous du calcul</h3><p>Le moteur ne propose jamais une extinction automatique.</p></div></div>
+              <div class="netting-rules">
+                <div><span>✓</span><p><strong>Factures acceptées uniquement</strong><small>Les factures rejetées ou en litige sont écartées.</small></p></div>
+                <div><span>€</span><p><strong>Compensation par devise</strong><small>Aucune conversion ou exposition de change.</small></p></div>
+                <div><span>◎</span><p><strong>Créances non cédées</strong><small>Les factures déclarées affacturées sont exclues.</small></p></div>
+                <div><span>✎</span><p><strong>Accord requis</strong><small>Chaque proposition doit être validée juridiquement et par toutes les parties.</small></p></div>
+              </div>
+            </article>
+          </div>
+
+          <div id="netting-results" hidden>
+            <div class="metric-grid netting-metric-grid">
+              <article class="metric"><span>Volume brut éligible</span><strong id="netting-gross">—</strong><small id="netting-invoices">0 facture</small></article>
+              <article class="metric accent"><span>Volume compensable</span><strong id="netting-offset">—</strong><small id="netting-rate">0 % du volume</small></article>
+              <article class="metric"><span>Cash résiduel</span><strong id="netting-residual">—</strong><small>à régler après accord</small></article>
+              <article class="metric"><span>Flux évités</span><strong id="netting-transfers">—</strong><small id="netting-transfer-detail">avant / après</small></article>
+            </div>
+
+            <div class="netting-results-grid">
+              <article class="panel netting-proposals-panel"><div class="panel-head"><div><span class="section-label">Opportunités détectées</span><h3>Propositions de compensation</h3></div><button class="button ghost" id="netting-export" type="button">Exporter CSV</button></div><div id="netting-proposals" class="netting-proposals"></div></article>
+              <article class="panel netting-positions-panel"><div class="panel-head"><div><span class="section-label">Après compensation</span><h3>Positions nettes</h3></div></div><div id="netting-positions" class="netting-positions"></div></article>
+            </div>
+
+            <article class="panel residual-panel"><div class="panel-head"><div><span class="section-label">Paiements restants</span><h3>Flux résiduels</h3></div><span id="netting-ignored" class="status-badge prepared">0 facture exclue</span></div><div class="residual-list" id="netting-residuals"></div></article>
+            <p class="netting-disclaimer">Simulation indicative : SettleMesh ne constate pas l’extinction juridique des créances, ne détient aucun fonds et n’initie aucun paiement. Un accord multipartite et une validation comptable, fiscale et juridique restent nécessaires.</p>
+          </div>
         </section>
 
         <section class="view" data-view="history">
