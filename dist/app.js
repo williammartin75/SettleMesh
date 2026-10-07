@@ -1,19 +1,24 @@
 import {
+  buildCycleRecord,
   computePlan,
   createDemoInvoices,
   getPortfolioSignals,
+  invoicesToCSV,
   isEligible,
   normalizeInvoice,
   parseInvoiceCSV,
-  settlementsToCSV
+  settlementsToCSV,
+  validatePortfolio
 } from "./core.js";
 
-const STORAGE_KEY = "settlemesh-workspace-v1";
+const STORAGE_KEY = "settlemesh-workspace-v2";
+const LEGACY_STORAGE_KEY = "settlemesh-workspace-v1";
 const TITLES = {
   overview: "Vue d’ensemble",
   invoices: "Factures",
   network: "Réseau",
   settlement: "Cycle de règlement",
+  audit: "Journal d’audit",
   settings: "Paramètres"
 };
 const STATUS_LABELS = { open: "Ouverte", overdue: "En retard", paid: "Payée", disputed: "En litige" };
@@ -21,12 +26,16 @@ const palette = ["#16865d", "#d77d3c", "#4871b8", "#9672bd", "#2b8f93", "#c96078
 
 function initialState() {
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY));
     if (stored && Array.isArray(stored.invoices)) {
       return {
         invoices: stored.invoices,
         approvals: stored.approvals || {},
-        cycleReady: Boolean(stored.cycleReady),
+        cycleReady: Boolean(stored.cycleReady && stored.currentCycle),
+        currentCycle: stored.currentCycle || null,
+        cycleHistory: Array.isArray(stored.cycleHistory) ? stored.cycleHistory : [],
+        auditLog: Array.isArray(stored.auditLog) ? stored.auditLog : [],
+        lastMutationAt: stored.lastMutationAt || new Date().toISOString(),
         view: location.hash.slice(1) in TITLES ? location.hash.slice(1) : "overview",
         graphMode: "obligations",
         networkMode: "obligations",
@@ -38,7 +47,8 @@ function initialState() {
     localStorage.removeItem(STORAGE_KEY);
   }
   return {
-    invoices: createDemoInvoices(), approvals: {}, cycleReady: false,
+    invoices: createDemoInvoices(), approvals: {}, cycleReady: false, currentCycle: null,
+    cycleHistory: [], auditLog: [], lastMutationAt: new Date().toISOString(),
     view: "overview", graphMode: "obligations", networkMode: "obligations",
     statusFilter: "all", search: ""
   };
@@ -54,7 +64,11 @@ function persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     invoices: state.invoices,
     approvals: state.approvals,
-    cycleReady: state.cycleReady
+    cycleReady: state.cycleReady,
+    currentCycle: state.currentCycle,
+    cycleHistory: state.cycleHistory,
+    auditLog: state.auditLog,
+    lastMutationAt: state.lastMutationAt
   }));
 }
 
@@ -84,6 +98,52 @@ function formatDate(value) {
   if (!value) return "—";
   const date = new Date(`${value}T00:00:00`);
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+  }).format(date);
+}
+
+function addAudit(type, title, detail, metadata = {}) {
+  state.auditLog.unshift({
+    id: `EVT-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    at: new Date().toISOString(), type, title, detail, metadata
+  });
+  state.auditLog = state.auditLog.slice(0, 200);
+}
+
+function invalidateCycle(title, detail) {
+  state.approvals = {};
+  state.cycleReady = false;
+  state.currentCycle = null;
+  state.lastMutationAt = new Date().toISOString();
+  addAudit("data", title, detail);
+}
+
+function buildCurrentCycle(status = state.cycleReady ? "sealed" : "draft") {
+  return buildCycleRecord({
+    invoices: state.invoices,
+    approvals: state.approvals,
+    createdAt: state.cycleReady && state.currentCycle?.createdAt ? state.currentCycle.createdAt : state.lastMutationAt,
+    status
+  });
+}
+
+function buildAuditPackage() {
+  const cycle = state.currentCycle || buildCurrentCycle("draft");
+  return {
+    schema: "settlemesh.audit-package.v1",
+    generatedAt: new Date().toISOString(),
+    notice: "Dossier de préparation. SettleMesh ne détient pas de fonds et n’initie aucun paiement.",
+    cycle,
+    controls: validatePortfolio(state.invoices),
+    auditTrail: state.auditLog
+  };
 }
 
 function initials(name) {
@@ -157,6 +217,7 @@ function renderKpis(plan) {
   $("#multilateral-cleared").textContent = formatEuro(plan.multilateralCleared);
   $("#impact-total").textContent = formatEuro(plan.totalCleared);
   $("#invoice-nav-count").textContent = state.invoices.length;
+  $("#audit-nav-count").textContent = state.auditLog.length;
   $("#eligible-count").textContent = plan.eligibleCount;
 }
 
@@ -242,7 +303,7 @@ function renderSettlement(plan) {
       <strong class="settlement-amount">${formatEuro(item.amount)}</strong>
     </div>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>Réseau équilibré</h3><p>Aucun virement résiduel n’est nécessaire.</p></div>`;
 
-  const activeEntities = new Set(plan.settlements.flatMap((item) => [item.from, item.to]));
+  const activeEntities = new Set(plan.entities.map((entity) => entity.name));
   const participants = [...activeEntities].sort((a, b) => a.localeCompare(b, "fr"));
   Object.keys(state.approvals).forEach((name) => {
     if (!activeEntities.has(name)) delete state.approvals[name];
@@ -251,19 +312,51 @@ function renderSettlement(plan) {
     <div class="approval-row">
       <span class="avatar" style="color:${hashColor(name)};background:${hashColor(name)}18">${initials(name)}</span>
       <span>${escapeHtml(name)}</span>
-      <button class="approval-toggle ${state.approvals[name] ? "on" : ""}" type="button" data-approval="${escapeHtml(name)}" role="switch" aria-checked="${Boolean(state.approvals[name])}" aria-label="Valider ${escapeHtml(name)}"></button>
+      <button class="approval-toggle ${state.approvals[name] ? "on" : ""}" type="button" data-approval="${escapeHtml(name)}" role="switch" aria-checked="${Boolean(state.approvals[name])}" aria-label="Valider ${escapeHtml(name)}" ${state.cycleReady ? "disabled" : ""}></button>
     </div>`).join("");
   const approved = participants.filter((name) => state.approvals[name]).length;
   const rate = participants.length ? Math.round(approved / participants.length * 100) : 100;
+  const validation = validatePortfolio(state.invoices);
+  const cycle = state.currentCycle || buildCurrentCycle("draft");
   $("#approval-text").textContent = `${approved} sur ${participants.length} validée${approved > 1 ? "s" : ""}`;
   $("#approval-rate").textContent = `${rate}%`;
   $("#approval-bar").style.width = `${rate}%`;
   $("#approve-all").textContent = approved === participants.length && participants.length ? "Retirer les validations" : "Valider toutes les parties";
-  $("#mark-ready").disabled = participants.length === 0 || approved !== participants.length;
-  $("#mark-ready").textContent = state.cycleReady ? "Cycle prêt ✓" : "Marquer le cycle prêt";
-  $("#cycle-status-copy").textContent = state.cycleReady ? "Cycle validé pour transmission à un futur partenaire PSP." : "Simulation uniquement — aucun paiement ne sera initié.";
+  $("#approve-all").disabled = state.cycleReady;
+  $("#mark-ready").disabled = !state.cycleReady && (!validation.ready || participants.length === 0 || approved !== participants.length);
+  $("#mark-ready").textContent = state.cycleReady ? "Rouvrir le cycle" : "Sceller le cycle";
+  $("#cycle-status-copy").textContent = state.cycleReady ? "Dossier scellé et prêt à être transmis à un partenaire — aucun paiement initié." : "Validation de démonstration uniquement — aucun paiement ne sera initié.";
+
+  $("#cycle-reference").textContent = state.cycleReady ? cycle.id : "BROUILLON";
+  $("#cycle-fingerprint").textContent = cycle.fingerprint;
+  $("#cycle-updated").textContent = formatDateTime(state.lastMutationAt);
+  $("#cycle-state").textContent = state.cycleReady ? "Scellé" : "Préparation";
+  $("#cycle-state").classList.toggle("sealed", state.cycleReady);
+  $("#quality-readiness").classList.toggle("complete", validation.ready);
+  $("#quality-readiness").classList.toggle("attention", !validation.ready);
+  $("#quality-readiness-copy").textContent = validation.ready
+    ? `${validation.stats.eligible} factures éligibles · ${validation.warnings.length} alerte${validation.warnings.length > 1 ? "s" : ""}`
+    : validation.issues[0];
+  $("#approval-readiness").classList.toggle("complete", approved === participants.length && participants.length > 0);
+  $("#approval-readiness-copy").textContent = participants.length ? `${approved}/${participants.length} participants validés` : "Aucun participant";
 
   $("#entity-options").innerHTML = plan.entities.map((entity) => `<option value="${escapeHtml(entity.name)}"></option>`).join("");
+}
+
+function renderAudit() {
+  $("#audit-count").textContent = `${state.auditLog.length} événement${state.auditLog.length > 1 ? "s" : ""}`;
+  $("#audit-nav-count").textContent = state.auditLog.length;
+  $("#audit-timeline").innerHTML = state.auditLog.length ? state.auditLog.map((event) => `
+    <div class="audit-event">
+      <span class="audit-mark ${escapeHtml(event.type)}"></span>
+      <div><div class="audit-event-head"><strong>${escapeHtml(event.title)}</strong><time>${formatDateTime(event.at)}</time></div><p>${escapeHtml(event.detail)}</p></div>
+    </div>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>Journal initialisé</h3><p>Les prochaines actions apparaîtront ici.</p></div>`;
+
+  $("#cycle-archive").innerHTML = state.cycleHistory.length ? state.cycleHistory.map((cycle) => `
+    <button class="archive-cycle" type="button" data-download-cycle="${escapeHtml(cycle.id)}">
+      <span><strong>${escapeHtml(cycle.id)}</strong><small>${formatDateTime(cycle.createdAt)} · ${cycle.metrics.eligibleInvoices} factures</small></span>
+      <b>${Math.round(cycle.metrics.reductionRate * 100)}%</b>
+    </button>`).join("") : `<div class="empty-state compact-empty"><div class="empty-icon">◇</div><h3>Aucun cycle scellé</h3><p>Un cycle archivé sera créé après validation de toutes les parties.</p></div>`;
 }
 
 function edgePath(from, to, nodeRadius, curve = 0) {
@@ -359,6 +452,7 @@ function render() {
   renderInvoices();
   renderEntities(plan);
   renderSettlement(plan);
+  renderAudit();
   renderGraph("overview");
   if (state.view === "network") renderGraph("detail");
   persist();
@@ -385,8 +479,7 @@ async function importFile(file) {
     state.invoices.push({ ...invoice, id: nextId });
     added += 1;
   });
-  state.approvals = {};
-  state.cycleReady = false;
+  invalidateCycle("Import CSV", `${added} facture(s) ajoutée(s)${result.errors.length ? ` · ${result.errors.length} ligne(s) ignorée(s)` : ""}.`);
   render();
   setView("invoices");
   toast("Import terminé", `${added} facture${added > 1 ? "s ajoutées" : " ajoutée"}${result.errors.length ? `, ${result.errors.length} ligne(s) ignorée(s)` : ""}.`);
@@ -439,8 +532,7 @@ function setupEvents() {
       const invoice = normalizeInvoice(Object.fromEntries(form.entries()), state.invoices.length);
       if (state.invoices.some((item) => item.id === invoice.id)) invoice.id = `${invoice.id}-${Date.now().toString().slice(-4)}`;
       state.invoices.unshift(invoice);
-      state.approvals = {};
-      state.cycleReady = false;
+      invalidateCycle("Facture ajoutée", `${invoice.id} · ${invoice.customer} doit ${formatEuro(invoice.amount)} à ${invoice.supplier}.`);
       render();
       closeModal();
       toast("Facture ajoutée", `${invoice.id} est intégrée au portefeuille.`);
@@ -466,8 +558,7 @@ function setupEvents() {
     if (!action) return;
     if (action === "delete" && pendingDeleteId) {
       state.invoices = state.invoices.filter((invoice) => invoice.id !== pendingDeleteId);
-      state.approvals = {};
-      state.cycleReady = false;
+      invalidateCycle("Facture retirée", `${pendingDeleteId} a été exclue du portefeuille.`);
       render();
       toast("Facture supprimée", `${pendingDeleteId} a été retirée du cycle.`);
     }
@@ -486,11 +577,36 @@ function setupEvents() {
     event.stopPropagation();
     download("modele-factures-settlemesh.csv", "\uFEFFreference;fournisseur;client;montant;date_echeance;statut\r\nINV-001;Fournisseur SAS;Client SARL;25000,00;2026-11-15;ouverte");
   });
+  $("#export-invoices").addEventListener("click", () => {
+    download(`settlemesh-factures-${new Date().toISOString().slice(0, 10)}.csv`, invoicesToCSV(state.invoices));
+    addAudit("export", "Portefeuille exporté", `${state.invoices.length} facture(s) exportée(s) en CSV.`);
+    renderAudit();
+    persist();
+    toast("Portefeuille exporté", "Les factures ont été enregistrées au format CSV.");
+  });
   $("#export-settlements").addEventListener("click", () => {
     const plan = computePlan(state.invoices);
     if (!plan.settlements.length) return toast("Aucun mouvement", "Le plan ne contient aucun virement à exporter.", "error");
     download(`settlemesh-plan-${new Date().toISOString().slice(0, 10)}.csv`, settlementsToCSV(plan.settlements));
+    addAudit("export", "Plan CSV exporté", `${plan.settlements.length} instruction(s) de règlement résiduel.`);
+    renderAudit();
+    persist();
     toast("Plan exporté", `${plan.settlements.length} instruction(s) enregistrée(s) au format CSV.`);
+  });
+  $("#export-cycle").addEventListener("click", () => {
+    const dossier = buildAuditPackage();
+    download(`${dossier.cycle.id}-dossier.json`, JSON.stringify(dossier, null, 2), "application/json;charset=utf-8");
+    addAudit("export", "Dossier d’audit exporté", `${dossier.cycle.id} · empreinte ${dossier.cycle.fingerprint}.`);
+    renderAudit();
+    persist();
+    toast("Dossier généré", "Le cycle, les contrôles et le journal ont été exportés en JSON.");
+  });
+  $("#export-audit").addEventListener("click", () => {
+    const dossier = buildAuditPackage();
+    download(`settlemesh-audit-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(dossier, null, 2), "application/json;charset=utf-8");
+    addAudit("export", "Journal exporté", `${state.auditLog.length} événement(s) inclus dans le dossier.`);
+    renderAudit();
+    persist();
   });
 
   $$('[data-graph-mode]').forEach((button) => button.addEventListener("click", () => {
@@ -507,36 +623,77 @@ function setupEvents() {
 
   $("#approval-list").addEventListener("click", (event) => {
     const button = event.target.closest("[data-approval]");
-    if (!button) return;
+    if (!button || state.cycleReady) return;
     state.approvals[button.dataset.approval] = !state.approvals[button.dataset.approval];
-    state.cycleReady = false;
+    state.lastMutationAt = new Date().toISOString();
+    addAudit("approval", state.approvals[button.dataset.approval] ? "Consentement enregistré" : "Consentement retiré", button.dataset.approval);
     renderSettlement(computePlan(state.invoices));
+    renderAudit();
     persist();
   });
   $("#approve-all").addEventListener("click", () => {
+    if (state.cycleReady) return;
     const plan = computePlan(state.invoices);
-    const participants = [...new Set(plan.settlements.flatMap((item) => [item.from, item.to]))];
+    const participants = plan.entities.map((entity) => entity.name);
     const allApproved = participants.length && participants.every((name) => state.approvals[name]);
     participants.forEach((name) => { state.approvals[name] = !allApproved; });
-    state.cycleReady = false;
+    state.lastMutationAt = new Date().toISOString();
+    addAudit("approval", allApproved ? "Consentements retirés" : "Consentements enregistrés", `${participants.length} participant(s) mis à jour dans la démonstration.`);
     renderSettlement(plan);
+    renderAudit();
     persist();
   });
   $("#mark-ready").addEventListener("click", () => {
-    state.cycleReady = !state.cycleReady;
+    if (state.cycleReady) {
+      const previousId = state.currentCycle?.id || "cycle";
+      state.cycleReady = false;
+      state.currentCycle = null;
+      state.lastMutationAt = new Date().toISOString();
+      addAudit("cycle", "Cycle rouvert", `${previousId} reste dans les archives locales.`);
+    } else {
+      const validation = validatePortfolio(state.invoices);
+      const plan = computePlan(state.invoices);
+      const participants = plan.entities.map((entity) => entity.name);
+      if (!validation.ready || !participants.length || !participants.every((name) => state.approvals[name])) {
+        toast("Cycle incomplet", validation.issues[0] || "Tous les participants doivent être validés.", "error");
+        return;
+      }
+      state.lastMutationAt = new Date().toISOString();
+      state.currentCycle = buildCycleRecord({ invoices: state.invoices, approvals: state.approvals, createdAt: state.lastMutationAt, status: "sealed" });
+      state.cycleReady = true;
+      if (!state.cycleHistory.some((cycle) => cycle.id === state.currentCycle.id)) state.cycleHistory.unshift(state.currentCycle);
+      addAudit("cycle", "Cycle scellé", `${state.currentCycle.id} · empreinte ${state.currentCycle.fingerprint}.`);
+    }
     renderSettlement(computePlan(state.invoices));
+    renderAudit();
     persist();
-    toast(state.cycleReady ? "Cycle prêt" : "Statut retiré", state.cycleReady ? "Le plan est prêt pour une future transmission au PSP." : "Le cycle est repassé en préparation.");
+    toast(state.cycleReady ? "Cycle scellé" : "Cycle rouvert", state.cycleReady ? "Le dossier est prêt pour transmission à un partenaire, sans initiation de paiement." : "Le cycle peut de nouveau être modifié.");
+  });
+
+  $("#cycle-archive").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-download-cycle]");
+    if (!button) return;
+    const cycle = state.cycleHistory.find((item) => item.id === button.dataset.downloadCycle);
+    if (!cycle) return;
+    download(`${cycle.id}.json`, JSON.stringify(cycle, null, 2), "application/json;charset=utf-8");
+    addAudit("export", "Cycle archivé exporté", cycle.id);
+    renderAudit();
+    persist();
   });
 
   $("#reset-data").addEventListener("click", () => {
     state.invoices = createDemoInvoices();
     state.approvals = {};
     state.cycleReady = false;
+    state.currentCycle = null;
+    state.cycleHistory = [];
+    state.auditLog = [];
+    state.lastMutationAt = new Date().toISOString();
     state.search = "";
     state.statusFilter = "all";
     $("#invoice-search").value = "";
     $$('[data-status]').forEach((item) => item.classList.toggle("active", item.dataset.status === "all"));
+    addAudit("system", "Espace réinitialisé", "Le portefeuille de démonstration a été restauré.");
     render();
     toast("Espace réinitialisé", "Le portefeuille de démonstration a été restauré.");
   });
@@ -545,6 +702,10 @@ function setupEvents() {
     const target = location.hash.slice(1);
     if (target in TITLES) setView(target);
   });
+}
+
+if (!state.auditLog.length) {
+  addAudit("system", "Espace de travail initialisé", "Le pilote local SettleMesh est prêt. Aucun fonds ne transite par l’application.");
 }
 
 setupEvents();

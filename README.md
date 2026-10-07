@@ -1,6 +1,6 @@
 # SettleMesh
 
-Prototype fonctionnel de clearing de factures B2B. L’application importe des factures, calcule les positions nettes d’un réseau d’entreprises et génère un plan de virements résiduels.
+MVP fonctionnel de préparation de cycles de compensation de factures B2B. L’application importe des factures, contrôle leur qualité, calcule les positions nettes d’un réseau d’entreprises et produit un dossier auditable à transmettre à des partenaires agréés.
 
 ## Fonctionnalités
 
@@ -9,7 +9,10 @@ Prototype fonctionnel de clearing de factures B2B. L’application importe des f
 - visualisation du réseau avant et après compensation ;
 - portefeuille filtrable et ajout manuel de factures ;
 - approbation simulée des participants ;
-- export CSV des instructions de règlement ;
+- scellement et archivage local des cycles avec empreinte déterministe ;
+- journal d’audit horodaté ;
+- export CSV des factures et instructions résiduelles ;
+- export JSON d’un dossier complet de cycle ;
 - stockage exclusivement local dans le navigateur.
 
 ## Utilisation locale
@@ -28,4 +31,4 @@ Les colonnes obligatoires sont `fournisseur`, `client` et `montant`. Les colonne
 
 ## Limites
 
-Ce prototype produit une simulation : il ne réalise ni novation, ni cession de créance, ni mouvement de fonds. Un déploiement réel nécessitera des accords contractuels, une analyse réglementaire et l’intégration d’un prestataire de paiement agréé.
+Ce MVP produit un dossier de préparation : il ne réalise ni novation, ni cession de créance, ni initiation ou mouvement de fonds. Les validations sont simulées et n’ont pas valeur de signature électronique. Un pilote réel nécessitera des accords contractuels, une analyse réglementaire, une authentification des entreprises et des intégrations avec une plateforme de facturation agréée et un prestataire de paiement agréé.

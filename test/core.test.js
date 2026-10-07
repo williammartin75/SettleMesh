@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computePlan, createDemoInvoices, parseInvoiceCSV, settlementsToCSV } from "../dist/core.js";
+import {
+  buildCycleRecord,
+  computePlan,
+  createDemoInvoices,
+  parseInvoiceCSV,
+  settlementsToCSV,
+  validatePortfolio
+} from "../dist/core.js";
 
 test("parse un CSV français séparé par des points-virgules", () => {
   const csv = "référence;fournisseur;client;montant;échéance;statut\nF-1;Alpha;Beta;12 500,50;31/10/2026;ouverte";
@@ -71,4 +78,23 @@ test("exporte un plan compatible avec un tableur français", () => {
   const csv = settlementsToCSV([{ from: "A; France", to: "B", amount: 1234.5 }]);
   assert.match(csv, /"A; France";B;1234,50/);
   assert.ok(csv.startsWith("\uFEFF"));
+});
+
+test("produit une empreinte de cycle déterministe", () => {
+  const invoices = createDemoInvoices();
+  const approvals = Object.fromEntries(computePlan(invoices).entities.map((entity) => [entity.name, true]));
+  const first = buildCycleRecord({ invoices, approvals, createdAt: "2026-10-07T12:00:00.000Z", status: "sealed" });
+  const second = buildCycleRecord({ invoices, approvals, createdAt: "2026-10-07T12:00:00.000Z", status: "sealed" });
+  assert.equal(first.fingerprint, second.fingerprint);
+  assert.equal(first.id, second.id);
+  assert.ok(first.participants.every((participant) => participant.approved));
+});
+
+test("détecte les références dupliquées avant scellement", () => {
+  const invoices = createDemoInvoices();
+  invoices.push({ ...invoices[0] });
+  const validation = validatePortfolio(invoices);
+  assert.equal(validation.ready, false);
+  assert.equal(validation.stats.duplicateIds, 1);
+  assert.match(validation.issues.join(" "), /doublon/i);
 });

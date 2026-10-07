@@ -39,6 +39,11 @@
           Cycle de règlement
           <span class="status-dot" aria-hidden="true"></span>
         </button>
+        <button class="nav-item" data-nav="audit" type="button">
+          <svg viewBox="0 0 24 24"><path d="M7 3h10v3h3v15H4V6h3zM8 11h8M8 15h8M8 19h5M9 3v4h6V3"/></svg>
+          Journal d’audit
+          <span class="nav-count" id="audit-nav-count">0</span>
+        </button>
       </nav>
 
       <div class="sidebar-spacer"></div>
@@ -50,7 +55,7 @@
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
         Paramètres
       </button>
-      <div class="sidebar-footer"><span>Prototype opérationnel</span><strong>v0.1</strong></div>
+      <div class="sidebar-footer"><span>Pilote fonctionnel</span><strong>v0.2</strong></div>
     </aside>
 
     <main class="main">
@@ -180,6 +185,7 @@
               <button type="button" data-status="overdue">En retard</button>
               <button type="button" data-status="excluded">Exclues</button>
             </div>
+            <button class="button ghost compact-button" id="export-invoices" type="button">Exporter</button>
             <button class="button ghost compact-button" id="download-template" type="button">Modèle CSV</button>
           </div>
           <div class="table-scroll">
@@ -226,10 +232,26 @@
 
       <section class="view" data-view="settlement">
         <div class="section-intro">
-          <div><span class="section-label">Cycle simulé</span><h2>Plan de règlement net</h2><p>Un plan déterministe calculé à partir des positions de chaque participant.</p></div>
-          <button class="button ghost" id="export-settlements" type="button">
-            <svg viewBox="0 0 24 24"><path d="M12 4v12M8 12l4 4 4-4M5 20h14"/></svg>Exporter le plan
-          </button>
+          <div><span class="section-label">Cycle sans mouvement de fonds</span><h2>Plan de compensation</h2><p>SettleMesh prépare, contrôle et trace le cycle. L’exécution bancaire reste chez un PSP agréé.</p></div>
+          <div class="button-row">
+            <button class="button ghost" id="export-settlements" type="button">
+              <svg viewBox="0 0 24 24"><path d="M12 4v12M8 12l4 4 4-4M5 20h14"/></svg>Plan CSV
+            </button>
+            <button class="button dark-button" id="export-cycle" type="button">
+              <svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM14 3v4h4M9 12h6M9 16h6"/></svg>Dossier d’audit
+            </button>
+          </div>
+        </div>
+
+        <article class="cycle-banner">
+          <div class="cycle-identity"><span class="cycle-orb">SM</span><div><span>Cycle courant</span><strong id="cycle-reference">BROUILLON</strong></div></div>
+          <div class="cycle-facts"><div><span>Empreinte</span><strong id="cycle-fingerprint">—</strong></div><div><span>Dernière modification</span><strong id="cycle-updated">—</strong></div><div><span>État</span><strong class="cycle-state" id="cycle-state">Préparation</strong></div></div>
+        </article>
+
+        <div class="readiness-grid">
+          <article class="readiness-item" id="quality-readiness"><span class="readiness-icon">1</span><div><strong>Qualité des données</strong><small id="quality-readiness-copy">Contrôle en cours</small></div></article>
+          <article class="readiness-item" id="approval-readiness"><span class="readiness-icon">2</span><div><strong>Consentement des parties</strong><small id="approval-readiness-copy">À collecter</small></div></article>
+          <article class="readiness-item partner"><span class="readiness-icon">3</span><div><strong>Transmission partenaire</strong><small>Export uniquement · PSP non connecté</small></div></article>
         </div>
 
         <div class="settlement-summary">
@@ -250,19 +272,36 @@
           </article>
 
           <aside class="card approval-card">
-            <div class="card-header compact"><div><span class="section-label">Consentement</span><h3>Validation des parties</h3></div></div>
+            <div class="card-header compact"><div><span class="section-label">Consentement simulé</span><h3>Validation des parties</h3></div></div>
             <div class="approval-progress"><div><span id="approval-text">0 sur 0 validées</span><strong id="approval-rate">0%</strong></div><div class="progress-track"><i id="approval-bar"></i></div></div>
             <div class="approval-list" id="approval-list"></div>
             <button class="button primary full" id="approve-all" type="button">Valider toutes les parties</button>
             <button class="button success full" id="mark-ready" type="button" disabled>Marquer le cycle prêt</button>
-            <p class="fine-print centered" id="cycle-status-copy">Simulation uniquement — aucun paiement ne sera initié.</p>
+            <p class="fine-print centered" id="cycle-status-copy">Validation de démonstration uniquement — aucun paiement ne sera initié.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" data-view="audit">
+        <div class="section-intro">
+          <div><span class="section-label">Traçabilité</span><h2>Journal d’audit</h2><p>Chaque modification, consentement et scellement est horodaté dans ce navigateur.</p></div>
+          <button class="button ghost" id="export-audit" type="button"><svg viewBox="0 0 24 24"><path d="M12 4v12M8 12l4 4 4-4M5 20h14"/></svg>Exporter JSON</button>
+        </div>
+        <div class="audit-layout">
+          <article class="card">
+            <div class="card-header"><div><span class="section-label">Activité</span><h3>Événements récents</h3></div><span class="count-pill" id="audit-count">0 événement</span></div>
+            <div class="audit-timeline" id="audit-timeline"></div>
+          </article>
+          <aside class="card cycle-archive-card">
+            <div class="card-header compact"><div><span class="section-label">Archives locales</span><h3>Cycles scellés</h3></div></div>
+            <div class="cycle-archive" id="cycle-archive"></div>
           </aside>
         </div>
       </section>
 
       <section class="view" data-view="settings">
         <div class="section-intro">
-          <div><span class="section-label">Configuration</span><h2>Paramètres du prototype</h2><p>Contrôlez les données stockées dans ce navigateur et les hypothèses de calcul.</p></div>
+          <div><span class="section-label">Configuration du pilote</span><h2>Périmètre opérationnel</h2><p>Un SaaS d’orchestration sans détention de fonds, conçu pour se connecter à des partenaires agréés.</p></div>
         </div>
         <div class="settings-grid">
           <article class="card settings-card">
@@ -272,15 +311,24 @@
           </article>
           <article class="card settings-card">
             <div class="settings-icon blue-bg">⌁</div>
-            <div><h3>Stockage local</h3><p>Les factures, approbations et préférences restent dans le stockage de votre navigateur.</p></div>
+            <div><h3>Stockage du pilote</h3><p>Les factures, approbations et journaux restent dans le stockage de votre navigateur.</p></div>
             <span class="settings-value good">Actif</span>
           </article>
           <article class="card settings-card">
             <div class="settings-icon orange-bg">!</div>
-            <div><h3>Cadre d’utilisation</h3><p>SettleMesh produit une simulation. Il ne réalise ni novation, ni cession de créance, ni mouvement de fonds.</p></div>
-            <span class="settings-value">Simulation</span>
+            <div><h3>Périmètre réglementaire</h3><p>SettleMesh prépare un dossier de compensation. Il ne réalise ni novation, ni cession de créance, ni initiation ou mouvement de fonds.</p></div>
+            <span class="settings-value">SaaS</span>
           </article>
         </div>
+        <article class="partner-stack">
+          <div class="partner-head"><div><span class="section-label">Architecture partenaire</span><h3>Chemin vers la production</h3></div><span class="status-badge open">Conçu pour l’intégration</span></div>
+          <div class="partner-flow">
+            <div><span class="partner-code">PA</span><strong>Plateforme agréée</strong><small>Source des factures électroniques et statuts</small></div><i>→</i>
+            <div class="active"><span class="partner-code">SM</span><strong>SettleMesh</strong><small>Contrôles, netting, consentements et audit</small></div><i>→</i>
+            <div><span class="partner-code">PSP</span><strong>Prestataire de paiement</strong><small>Exécution des virements résiduels</small></div>
+          </div>
+          <p>Aucun connecteur réel n’est activé dans ce pilote. Les exports structurés servent à tester le processus avec un partenaire avant intégration API.</p>
+        </article>
         <article class="card danger-zone">
           <div><span class="section-label">Gestion des données</span><h3>Réinitialiser l’espace de travail</h3><p>Recharge le portefeuille de démonstration et efface les approbations enregistrées.</p></div>
           <button class="button danger" id="reset-data" type="button">Réinitialiser les données</button>

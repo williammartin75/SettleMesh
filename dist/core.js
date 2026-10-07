@@ -296,6 +296,100 @@ export function computePlan(invoices) {
   };
 }
 
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function createFingerprint(value) {
+  const source = stableStringify(value);
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0").toUpperCase();
+}
+
+export function validatePortfolio(invoices) {
+  const plan = computePlan(invoices);
+  const issues = [];
+  const warnings = [];
+  const ids = new Map();
+
+  invoices.forEach((invoice) => {
+    const id = cleanName(invoice.id);
+    ids.set(id, (ids.get(id) || 0) + 1);
+  });
+  const duplicateIds = [...ids.entries()].filter(([, count]) => count > 1).map(([id]) => id);
+  const missingDueDates = invoices.filter((invoice) => isEligible(invoice) && !invoice.dueDate).length;
+
+  if (!plan.eligibleCount) issues.push("Aucune facture éligible au calcul.");
+  if (plan.entities.length < 2) issues.push("Au moins deux entreprises sont nécessaires.");
+  if (duplicateIds.length) issues.push(`${duplicateIds.length} référence(s) de facture en doublon.`);
+  if (missingDueDates) warnings.push(`${missingDueDates} facture(s) éligible(s) sans date d’échéance.`);
+  if (plan.entities.length === 2) warnings.push("Le portefeuille ne permet qu’une compensation bilatérale.");
+  if (plan.eligibleCount && plan.reductionRate === 0) warnings.push("Aucun gain de liquidité n’est détecté sur ce portefeuille.");
+
+  return {
+    ready: issues.length === 0,
+    issues,
+    warnings,
+    stats: {
+      invoices: invoices.length,
+      eligible: plan.eligibleCount,
+      excluded: plan.excludedCount,
+      entities: plan.entities.length,
+      duplicateIds: duplicateIds.length,
+      missingDueDates
+    }
+  };
+}
+
+export function buildCycleRecord({ invoices, approvals = {}, createdAt = new Date().toISOString(), status = "draft" }) {
+  const plan = computePlan(invoices);
+  const eligibleInvoices = invoices
+    .filter(isEligible)
+    .map((invoice) => ({
+      id: invoice.id,
+      supplier: invoice.supplier,
+      customer: invoice.customer,
+      amount: Number(invoice.amount),
+      dueDate: invoice.dueDate || "",
+      status: canonicalStatus(invoice.status)
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id, "fr"));
+  const participants = plan.entities.map((entity) => ({
+    name: entity.name,
+    approved: Boolean(approvals[entity.name]),
+    net: entity.net
+  })).sort((left, right) => left.name.localeCompare(right.name, "fr"));
+  const payload = {
+    schema: "settlemesh.cycle.v1",
+    createdAt,
+    status,
+    currency: "EUR",
+    algorithm: "bilateral-then-multilateral-netting-v1",
+    metrics: {
+      gross: plan.gross,
+      cleared: plan.totalCleared,
+      netCash: plan.netCash,
+      reductionRate: plan.reductionRate,
+      eligibleInvoices: plan.eligibleCount,
+      excludedInvoices: plan.excludedCount
+    },
+    invoices: eligibleInvoices,
+    participants,
+    settlements: plan.settlements
+  };
+  const fingerprint = createFingerprint(payload);
+  const compactDate = String(createdAt).slice(0, 10).replace(/-/g, "") || "UNDATED";
+  return { ...payload, id: `SM-${compactDate}-${fingerprint.slice(0, 6)}`, fingerprint };
+}
+
 export function getPortfolioSignals(invoices, today = new Date()) {
   const date = new Date(today);
   date.setHours(0, 0, 0, 0);
@@ -362,6 +456,19 @@ export function settlementsToCSV(settlements) {
     escapeCsv(item.from),
     escapeCsv(item.to),
     Number(item.amount).toFixed(2).replace(".", ",")
+  ].join(";")));
+  return `\uFEFF${lines.join("\r\n")}`;
+}
+
+export function invoicesToCSV(invoices) {
+  const lines = ["reference;fournisseur;client;montant_eur;date_echeance;statut"];
+  invoices.forEach((invoice) => lines.push([
+    escapeCsv(invoice.id),
+    escapeCsv(invoice.supplier),
+    escapeCsv(invoice.customer),
+    Number(invoice.amount).toFixed(2).replace(".", ","),
+    escapeCsv(invoice.dueDate || ""),
+    escapeCsv(canonicalStatus(invoice.status))
   ].join(";")));
   return `\uFEFF${lines.join("\r\n")}`;
 }
