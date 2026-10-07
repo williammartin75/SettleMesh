@@ -23,8 +23,9 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - import d’un registre de factures en CSV, exclusion des créances litigieuses ou cédées et séparation stricte par devise ;
 - calcul du volume compensable, des positions nettes et des paiements résiduels ;
 - export CSV des propositions de compensation et des factures mobilisées ;
+- API locale versionnée `/api/v1` pour intégrer la validation UBL/CII dans un ERP ou un logiciel de facturation ;
 - interface fournisseur utilisable sans compte ;
-- aucune transmission ou conservation serveur des factures dans ce MVP.
+- aucune transmission serveur depuis l'interface navigateur et aucune persistance dans l'API pilote.
 
 ## Utilisation locale
 
@@ -36,6 +37,8 @@ npm run serve
 ```
 
 Puis ouvrir `http://127.0.0.1:4173`.
+
+Le serveur local expose également `GET /api/v1/health` et `POST /api/v1/validate`. Le contrat, les exemples et les limites de sécurité sont décrits dans [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Cette API pilote n'est pas incluse dans l'hébergement statique et ne doit pas être exposée sur Internet avant l'ajout d'une authentification.
 
 ## Démonstration
 

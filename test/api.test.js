@@ -1,0 +1,90 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createDemoXml, DEFAULT_PROFILE } from "../dist/core.js";
+import { createSettleMeshServer, listen, MAX_API_BODY_BYTES } from "../server/server.mjs";
+
+async function withServer(run, options = {}) {
+  const server = createSettleMeshServer({ logger: null, ...options });
+  const address = await listen(server, { port: 0 });
+  try {
+    return await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}
+
+test("expose la santé et les versions de l’API v1", () => withServer(async (baseUrl) => {
+  const response = await fetch(`${baseUrl}/api/v1/health`);
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.apiVersion, "v1");
+  assert.equal(body.validators.en16931, "1.3.16");
+  assert.equal(body.persistence, false);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+}));
+
+test("valide un UBL conforme sans renvoyer ni stocker le XML", () => withServer(async (baseUrl) => {
+  const xml = createDemoXml({ valid: true, profile: DEFAULT_PROFILE });
+  const response = await fetch(`${baseUrl}/api/v1/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ xml, profile: DEFAULT_PROFILE, source: { originalFileName: "invoice.xml" } })
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.schema, "settlemesh-validation-response");
+  assert.equal(body.stored, false);
+  assert.equal(body.result.outcome, "ready");
+  assert.equal(body.result.standards.complete, true);
+  assert.equal(body.result.standards.en16931, "1.3.16");
+  assert.equal(body.result.invoice.raw, undefined);
+  assert.doesNotMatch(JSON.stringify(body), /Mission de conseil/);
+}));
+
+test("retourne une erreur structurée pour un XML invalide", () => withServer(async (baseUrl) => {
+  const response = await fetch(`${baseUrl}/api/v1/validate`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ xml: "<Invoice>" })
+  });
+  const body = await response.json();
+  assert.equal(response.status, 422);
+  assert.equal(body.schema, "settlemesh-api-error");
+  assert.equal(body.error.code, "INVALID_XML");
+  assert.ok(body.requestId);
+}));
+
+test("refuse les déclarations DOCTYPE dans un XML non fiable", () => withServer(async (baseUrl) => {
+  const response = await fetch(`${baseUrl}/api/v1/validate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ xml: '<!DOCTYPE Invoice [<!ENTITY secret SYSTEM "file:///etc/passwd">]><Invoice>&secret;</Invoice>' })
+  });
+  const body = await response.json();
+  assert.equal(response.status, 422);
+  assert.equal(body.error.code, "UNSAFE_XML");
+  assert.doesNotMatch(JSON.stringify(body), /etc\/passwd/);
+}));
+
+test("refuse les médias et méthodes non prévus", () => withServer(async (baseUrl) => {
+  const wrongType = await fetch(`${baseUrl}/api/v1/validate`, { method: "POST", body: "{}" });
+  assert.equal(wrongType.status, 415);
+  const wrongMethod = await fetch(`${baseUrl}/api/v1/validate`);
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get("allow"), "POST");
+}));
+
+test("applique une limite de débit explicite", () => withServer(async (baseUrl) => {
+  assert.equal((await fetch(`${baseUrl}/api/v1/health`)).status, 200);
+  const response = await fetch(`${baseUrl}/api/v1/health`);
+  const body = await response.json();
+  assert.equal(response.status, 429);
+  assert.equal(body.error.code, "RATE_LIMITED");
+}, { rateLimit: 1 }));
+
+test("refuse une requête dépassant la limite documentée", () => withServer(async (baseUrl) => {
+  const response = await fetch(`${baseUrl}/api/v1/validate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ xml: " ".repeat(MAX_API_BODY_BYTES) })
+  });
+  const body = await response.json();
+  assert.equal(response.status, 413);
+  assert.equal(body.error.code, "BODY_TOO_LARGE");
+}));

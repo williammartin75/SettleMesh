@@ -7,18 +7,18 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.4.0` |
-| État | MVP fonctionnel, statique et démontrable ; pas encore un service multi-entreprises en production |
+| Version du code | `0.5.0` |
+| État | MVP fonctionnel avec interface statique et API locale versionnée ; pas encore un service multi-entreprises en production |
 | Dernière revue | 7 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
-| Hébergement configuré | Site statique dont la racine de publication est `dist/` |
+| Hébergement configuré | Site statique dont la racine de publication est `dist/` ; l'API Node n'est pas déployée par cet hébergement |
 | Langue actuelle | Français |
-| Architecture | HTML, CSS et JavaScript natifs ; traitement local dans le navigateur ; aucune API métier serveur |
+| Architecture | HTML, CSS et JavaScript natifs dans le navigateur ; serveur Node local pour l'API pilote `/api/v1` |
 | Promesse courte | **Rendre les factures conformes avant envoi, puis identifier les paiements qui peuvent être compensés.** |
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 21 tests au 7 octobre 2026 |
+| Tests automatisés | 28 tests au 7 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -140,6 +140,7 @@ Légende :
 | Lots | Jusqu'à 20 fichiers, 20 Mo chacun | Opérationnel | Traitement séquentiel dans le navigateur |
 | Rapports | TXT, JSON et CSV | Opérationnel | Pas de signature ni piste d'audit serveur |
 | Historique | Recherche, filtre et suppression locale | Opérationnel | 100 résultats maximum dans le navigateur |
+| Intégration | API de validation `/api/v1` | Partiel | Contrat et endpoint local opérationnels ; authentification et déploiement de production absents |
 | Netting | Import CSV d'obligations | Opérationnel | 2 Mo et 500 obligations conservées localement |
 | Netting | Compensation bilatérale | Opérationnel | Simulation seulement, accord requis |
 | Netting | Cycles triangulaires | Opérationnel | Cycles de trois uniquement |
@@ -233,7 +234,7 @@ Sorties :
 - rapport JSON structuré ;
 - synthèse et export CSV d'un lot.
 
-Confidentialité actuelle : le fichier est traité en mémoire. Le XML brut est retiré avant l'enregistrement du résultat dans l'historique. Aucune requête métier vers un serveur SettleMesh n'est effectuée.
+Confidentialité actuelle : dans l'interface, le fichier est traité en mémoire et aucune requête métier vers un serveur SettleMesh n'est effectuée. Le XML brut est retiré avant l'enregistrement du résultat dans l'historique. L'API v1 constitue un canal distinct et explicite : son client envoie le XML au serveur local, qui le traite sans le persister ni le renvoyer.
 
 ### 4.4 SettleMesh Net — route `#netting`
 
@@ -425,6 +426,7 @@ SettleMesh/
 │   ├── styles.css               design system et responsive
 │   ├── app.js                   état, navigation, rendu et interactions
 │   ├── storage.js               persistance locale et migration de l'ancienne marque
+│   ├── svrl.js                  lecture partagée des rapports de validation officiels
 │   ├── core.js                  profil, parsing et validation métier facture
 │   ├── facturx.js               extraction du XML embarqué dans un PDF
 │   ├── standards.js             exécution EN 16931 et Peppol
@@ -432,7 +434,7 @@ SettleMesh/
 │   ├── validation/              artefacts XSLT compilés en SEF
 │   └── vendor/                  runtimes PDF.js et SaxonJS pour le navigateur
 ├── scripts/
-│   ├── serve.mjs                serveur statique local, port 4173
+│   ├── serve.mjs                lancement de l'application et de l'API locale, port 4173
 │   └── build-validation-assets.mjs
 │                                compilation/copie des moteurs normatifs
 ├── test/
@@ -440,7 +442,14 @@ SettleMesh/
 │   ├── standards.test.js        artefacts officiels et Factur-X réel
 │   ├── netting.test.js          invariants de compensation et CSV
 │   ├── storage.test.js          priorité et migration du stockage local
+│   ├── api.test.js              contrat HTTP, confidentialité et limites API
 │   └── fixtures/                documents de test
+├── server/
+│   ├── server.mjs               HTTP, routage, limites et fichiers statiques
+│   └── validation.mjs           validation serveur EN 16931 / Peppol
+├── docs/
+│   ├── API.md                   guide humain d'intégration
+│   └── openapi.yaml             contrat OpenAPI 3.1
 └── vendor/                      sources et licences normatives
 ```
 
@@ -468,7 +477,14 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 - `SaxonJS 2.7.0` : exécution des règles XSLT compilées.
 - `xslt3 2.7.0` : compilation des artefacts de validation.
 - `pdfjs-dist 6.4.299` : lecture des pièces jointes PDF.
+- `@xmldom/xmldom 0.9.12` : parsing XML dans le runtime Node de l'API.
 - Aucun framework frontend ni service externe à l'exécution métier actuelle.
+
+### 7.4 API de validation v1
+
+Le serveur local expose `GET /api/v1/health` et `POST /api/v1/validate`. La validation reçoit un JSON contenant le XML, un profil optionnel et un nom de source. Elle exécute les contrôles produit, EN 16931 et, si applicable, Peppol. La réponse ne contient pas le XML brut et porte `stored: false`.
+
+Limites : corps HTTP de 2 Mo, XML de 1 Mo et 60 requêtes par minute et par adresse IP. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Elle n'ouvre pas CORS, ne possède pas encore d'authentification et n'est pas déployée avec le site statique. Le contrat de référence est `docs/openapi.yaml`.
 
 ## 8. Invariants à ne jamais casser
 
@@ -484,6 +500,7 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 
 - Le MVP ne transmet pas le contenu des factures à un backend SettleMesh.
 - Le XML brut ne doit pas entrer dans l'historique persistant.
+- L'API ne doit ni persister, ni renvoyer, ni journaliser le XML brut.
 - Les exports CSV doivent neutraliser les cellules commençant par `=`, `+`, `-` ou `@`.
 - Les nouvelles limites de taille doivent être explicites côté interface et code.
 - Aucune donnée sensible ne doit être ajoutée au fragment du CheckLink.
@@ -510,7 +527,7 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 
 ### 9.1 Position actuelle
 
-SettleMesh v0.4 fournit un précontrôle technique et une simulation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
+SettleMesh v0.5 fournit un précontrôle technique, une API locale d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
 
 ### 9.2 Analyse obligatoire avant un pilote de compensation réelle
 
@@ -612,7 +629,7 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 21 tests
+### 12.2 Couverture actuelle des 28 tests
 
 `test/core.test.js` — 11 tests :
 
@@ -647,6 +664,16 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - récupération et réécriture d'une sauvegarde locale Eurule sous la clé SettleMesh ;
 - priorité de la sauvegarde courante et repli sur une ancienne sauvegarde valide si la nouvelle est illisible.
 
+`test/api.test.js` — 7 tests :
+
+- santé, version et absence de persistance ;
+- validation complète d'un UBL sans restitution du XML ;
+- erreur XML structurée ;
+- rejet des déclarations `DOCTYPE` ;
+- refus des méthodes et types de média non prévus ;
+- limitation de débit explicite ;
+- rejet des requêtes dépassant la taille maximale.
+
 ### 12.3 Tests manuels de référence
 
 - modifier le profil et vérifier que les trois aperçus changent ;
@@ -670,7 +697,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - [x] Adopter SettleMesh comme marque mère, SettleMesh CheckLink comme module de conformité et SettleMesh Net comme module de compensation, avec migration rétrocompatible des données Eurule.
 - [ ] Ajouter une vraie authentification et des organisations multi-utilisateurs.
 - [ ] Stocker profils et journaux côté serveur avec chiffrement, rétention et droits d'accès.
-- [ ] Créer une API de validation versionnée.
+- [x] Créer une API de validation versionnée avec contrat OpenAPI, validation serveur et absence de persistance ; authentification et déploiement restent liés aux points précédents.
 - [ ] Ajouter les contrôles nationaux du premier marché cible.
 - [ ] Vérifier la conformité PDF/A-3 de Factur-X, pas seulement le XML embarqué.
 - [ ] Ajouter VIES et Peppol Directory avec états `vérifié`, `indisponible`, `non vérifié` distincts.
@@ -726,6 +753,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Identités d'entreprises ambiguës | Élevé | Normalisation simple aujourd'hui ; KYB et identifiants légaux demain |
 | CSV incorrect ou malveillant | Moyen | Limites, validation, échappement HTML et neutralisation des formules |
 | Réapparition de l'ancienne marque Eurule | Faible | SettleMesh est la marque mère depuis v0.4 ; les anciens profils et données locales restent importables uniquement pour compatibilité |
+| API pilote exposée sans authentification | Critique | Écoute locale par défaut, pas de CORS, limites strictes et avertissement explicite ; ne pas déployer avant identité, quotas persistants et revue sécurité |
 
 ## 15. Journal des décisions
 
@@ -740,6 +768,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-07 | Exiger l'accord des parties | Une optimisation mathématique n'éteint pas seule une créance | Futur workflow de consentement et de preuve |
 | 2026-10-07 | Faire de ce fichier la source de vérité | Éviter les dérives de périmètre et décisions perdues | Mise à jour obligatoire lors de changements matériels |
 | 2026-10-07 | Adopter SettleMesh comme marque mère | Unifier la conformité et la compensation sous une seule promesse | CheckLink et Net deviennent deux modules SettleMesh ; les anciennes données Eurule sont migrées |
+| 2026-10-07 | Versionner l'intégration de validation sous `/api/v1` | Offrir une surface stable aux ERP sans modifier le parcours CheckLink | XML transmis uniquement sur appel API explicite, non persisté, API locale tant que l'authentification manque |
 
 ## 16. Questions ouvertes à trancher
 

@@ -28,7 +28,7 @@ const node = (scope, localName) => {
 
 const directField = (scope, localName) => {
   if (!scope) return "";
-  return [...scope.children].find((child) => child.localName === localName)?.textContent?.trim() || "";
+  return [...(scope.childNodes || [])].find((child) => child.nodeType === 1 && child.localName === localName)?.textContent?.trim() || "";
 };
 
 const number = (value) => {
@@ -154,11 +154,13 @@ export function createCheckLink(profile, locationLike = globalThis.location) {
   return `${origin}${pathname}#check/${profileSlug(profile.companyName)}/${encodeProfile(profile)}`;
 }
 
-export function parseInvoiceXml(xmlText) {
+export function parseInvoiceXml(xmlText, Parser = globalThis.DOMParser) {
   const raw = String(xmlText || "").trim();
   if (!raw) throw new Error("Le fichier est vide.");
-  const document = new DOMParser().parseFromString(raw, "application/xml");
-  if (document.querySelector("parsererror")) throw new Error("Le XML n’est pas lisible. Vérifiez que le fichier n’est pas tronqué.");
+  if (typeof Parser !== "function") throw new Error("Le parseur XML est indisponible dans cet environnement.");
+  const document = new Parser().parseFromString(raw, "application/xml");
+  const parserErrors = document.getElementsByTagNameNS?.("*", "parsererror") || [];
+  if (parserErrors.length) throw new Error("Le XML n’est pas lisible. Vérifiez que le fichier n’est pas tronqué.");
   const root = document.documentElement;
   const rootName = root.localName;
   const isUbl = rootName === "Invoice" || rootName === "CreditNote";
