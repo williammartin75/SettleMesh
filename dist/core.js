@@ -96,7 +96,8 @@ export function decodeProfile(value) {
   }
 }
 
-const PROFILE_BUNDLE_SCHEMA = "eurule-checklink-profile";
+const PROFILE_BUNDLE_SCHEMA = "settlemesh-checklink-profile";
+const LEGACY_PROFILE_BUNDLE_SCHEMAS = new Set(["eurule-checklink-profile"]);
 const SUPPORTED_FORMATS = ["UBL", "CII", "FACTUR-X"];
 
 export function createProfileBundle(profile) {
@@ -117,7 +118,7 @@ export function parseProfileBundle(value) {
     throw new Error("Le fichier de profil n’est pas un JSON valide.");
   }
   if (!payload || typeof payload !== "object") throw new Error("Le profil importé est vide.");
-  if (payload.schema && payload.schema !== PROFILE_BUNDLE_SCHEMA) throw new Error("Ce fichier n’est pas un profil Eurule compatible.");
+  if (payload.schema && payload.schema !== PROFILE_BUNDLE_SCHEMA && !LEGACY_PROFILE_BUNDLE_SCHEMAS.has(payload.schema)) throw new Error("Ce fichier n’est pas un profil SettleMesh compatible.");
   const source = payload.profile && typeof payload.profile === "object" ? payload.profile : payload;
   const companyName = String(source.companyName || "").trim();
   const legalName = String(source.legalName || "").trim();
@@ -148,7 +149,7 @@ export function parseProfileBundle(value) {
 }
 
 export function createCheckLink(profile, locationLike = globalThis.location) {
-  const origin = locationLike?.origin || "https://eurule.example";
+  const origin = locationLike?.origin || "https://settlemesh.example";
   const pathname = locationLike?.pathname || "/";
   return `${origin}${pathname}#check/${profileSlug(profile.companyName)}/${encodeProfile(profile)}`;
 }
@@ -366,7 +367,7 @@ export function createDemoXml({ valid = false, profile = DEFAULT_PROFILE } = {})
 export function exportResultText(result) {
   const summary = resultSummary(result);
   return [
-    `EURULE CHECKLINK — ${summary.label}`, `Contrôle : ${result.id}`, `Destinataire : ${result.recipient}`,
+    `SETTLEMESH CHECKLINK — ${summary.label}`, `Contrôle : ${result.id}`, `Destinataire : ${result.recipient}`,
     `Facture : ${result.invoice.invoiceNumber || "sans numéro"}`, `Score : ${result.score}/100`, "",
     ...result.checks.map((item) => `${item.status === "pass" ? "✓" : item.status === "error" ? "✕" : "!"} ${item.title}${item.fix ? ` — ${item.fix}` : ""}`),
     "", "Rapport d’aide à la préparation — ne constitue pas une certification juridique."
@@ -375,7 +376,7 @@ export function exportResultText(result) {
 
 export function exportResultJson(result) {
   return JSON.stringify({
-    schema: "eurule-validation-report",
+    schema: "settlemesh-validation-report",
     version: 1,
     generatedAt: new Date().toISOString(),
     result

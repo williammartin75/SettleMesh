@@ -6,8 +6,8 @@
 
 | Champ | Valeur actuelle |
 |---|---|
-| Produit | **SettleMesh**, avec le module d'acquisition **Eurule CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.3.0` |
+| Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
+| Version du code | `0.4.0` |
 | État | MVP fonctionnel, statique et démontrable ; pas encore un service multi-entreprises en production |
 | Dernière revue | 7 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 18 tests au 7 octobre 2026 |
+| Tests automatisés | 21 tests au 7 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -424,6 +424,7 @@ SettleMesh/
 │   ├── index.html               structure des six vues
 │   ├── styles.css               design system et responsive
 │   ├── app.js                   état, navigation, rendu et interactions
+│   ├── storage.js               persistance locale et migration de l'ancienne marque
 │   ├── core.js                  profil, parsing et validation métier facture
 │   ├── facturx.js               extraction du XML embarqué dans un PDF
 │   ├── standards.js             exécution EN 16931 et Peppol
@@ -438,13 +439,14 @@ SettleMesh/
 │   ├── core.test.js             profil, règles et exports
 │   ├── standards.test.js        artefacts officiels et Factur-X réel
 │   ├── netting.test.js          invariants de compensation et CSV
+│   ├── storage.test.js          priorité et migration du stockage local
 │   └── fixtures/                documents de test
 └── vendor/                      sources et licences normatives
 ```
 
 ### 7.1 Modèle d'état local
 
-Clé `localStorage` : `eurule-checklink-v1`.
+Clé `localStorage` : `settlemesh-v1`. Au premier chargement, l'application recherche aussi l'ancienne clé `eurule-checklink-v1` et copie son contenu valide afin de préserver les profils, l'historique et les obligations existants.
 
 ```text
 profile      configuration de réception de l'entreprise
@@ -508,7 +510,7 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 
 ### 9.1 Position actuelle
 
-SettleMesh v0.3 fournit un précontrôle technique et une simulation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
+SettleMesh v0.4 fournit un précontrôle technique et une simulation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
 
 ### 9.2 Analyse obligatoire avant un pilote de compensation réelle
 
@@ -610,12 +612,13 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 18 tests
+### 12.2 Couverture actuelle des 21 tests
 
-`test/core.test.js` — 10 tests :
+`test/core.test.js` — 11 tests :
 
 - encodage et décodage du profil ;
 - export et réimport d'un profil portable ;
+- import rétrocompatible d'un ancien profil Eurule ;
 - slug et lien partageable ;
 - complétude ;
 - mauvaise entité ;
@@ -639,6 +642,11 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - détection d'un total TTC erroné ;
 - extraction et validation du CII embarqué dans un vrai PDF Factur-X.
 
+`test/storage.test.js` — 2 tests :
+
+- récupération et réécriture d'une sauvegarde locale Eurule sous la clé SettleMesh ;
+- priorité de la sauvegarde courante et repli sur une ancienne sauvegarde valide si la nouvelle est illisible.
+
 ### 12.3 Tests manuels de référence
 
 - modifier le profil et vérifier que les trois aperçus changent ;
@@ -659,7 +667,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 
 ### P0 — rendre le pilote crédible
 
-- [ ] Choisir définitivement l'architecture de marque : SettleMesh comme marque mère et CheckLink comme module, ou migration complète depuis Eurule.
+- [x] Adopter SettleMesh comme marque mère, SettleMesh CheckLink comme module de conformité et SettleMesh Net comme module de compensation, avec migration rétrocompatible des données Eurule.
 - [ ] Ajouter une vraie authentification et des organisations multi-utilisateurs.
 - [ ] Stocker profils et journaux côté serveur avec chiffrement, rétention et droits d'accès.
 - [ ] Créer une API de validation versionnée.
@@ -717,7 +725,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Règles officielles obsolètes | Élevé | Versions affichées, artefacts vendoriés, processus de mise à jour à instaurer |
 | Identités d'entreprises ambiguës | Élevé | Normalisation simple aujourd'hui ; KYB et identifiants légaux demain |
 | CSV incorrect ou malveillant | Moyen | Limites, validation, échappement HTML et neutralisation des formules |
-| Marque Eurule / SettleMesh confuse | Moyen | Décision P0 et migration cohérente de l'interface, exports et schémas |
+| Réapparition de l'ancienne marque Eurule | Faible | SettleMesh est la marque mère depuis v0.4 ; les anciens profils et données locales restent importables uniquement pour compatibilité |
 
 ## 15. Journal des décisions
 
@@ -731,10 +739,10 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-07 | Ne pas déplacer de fonds | Rester dans un périmètre de simulation pour le MVP | Partenaire réglementé requis avant exécution |
 | 2026-10-07 | Exiger l'accord des parties | Une optimisation mathématique n'éteint pas seule une créance | Futur workflow de consentement et de preuve |
 | 2026-10-07 | Faire de ce fichier la source de vérité | Éviter les dérives de périmètre et décisions perdues | Mise à jour obligatoire lors de changements matériels |
+| 2026-10-07 | Adopter SettleMesh comme marque mère | Unifier la conformité et la compensation sous une seule promesse | CheckLink et Net deviennent deux modules SettleMesh ; les anciennes données Eurule sont migrées |
 
 ## 16. Questions ouvertes à trancher
 
-- Quelle marque finale : SettleMesh, Eurule, ou SettleMesh CheckLink ?
 - Premier acheteur cible : PME, ETI, cabinet comptable, marketplace ou éditeur de facturation ?
 - Premier pays et première verticale ?
 - Qui paie : acheteur, logiciel, plateforme ou ensemble des participants au netting ?

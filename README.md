@@ -1,6 +1,6 @@
-# Eurule CheckLink
+# SettleMesh
 
-MVP de prévalidation des factures électroniques européennes. Une entreprise configure son profil de réception et partage un CheckLink avec ses fournisseurs. Ceux-ci contrôlent leur facture UBL, CII ou Factur-X avant transmission et reçoivent des corrections formulées en langage simple.
+SettleMesh transforme des factures conformes en flux de paiement plus simples. Le module **SettleMesh CheckLink** permet à une entreprise de configurer son profil de réception et de le partager avec ses fournisseurs. Ceux-ci contrôlent leur facture UBL, CII ou Factur-X avant transmission et reçoivent des corrections formulées en langage simple. **SettleMesh Net** détecte ensuite les obligations réciproques pouvant faire l'objet d'une compensation après accord des parties.
 
 Le périmètre produit, l'état de chaque module, les invariants, les risques et la feuille de route sont centralisés dans [`PROJECT_DASHBOARD.md`](./PROJECT_DASHBOARD.md). Toute modification du dépôt est soumise à la règle de contrôle définie dans [`AGENTS.md`](./AGENTS.md).
 

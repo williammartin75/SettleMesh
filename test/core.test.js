@@ -29,16 +29,23 @@ test("encode et décode un profil CheckLink", () => {
 test("exporte et réimporte un profil portable validé", () => {
   const bundle = createProfileBundle(DEFAULT_PROFILE);
   const imported = parseProfileBundle(JSON.stringify(bundle));
-  assert.equal(bundle.schema, "eurule-checklink-profile");
+  assert.equal(bundle.schema, "settlemesh-checklink-profile");
   assert.equal(imported.companyName, DEFAULT_PROFILE.companyName);
   assert.deepEqual(imported.acceptedFormats, DEFAULT_PROFILE.acceptedFormats);
   assert.throws(() => parseProfileBundle('{"profile":{"companyName":"Incomplet"}}'), /obligatoires/);
 });
 
+test("importe encore les profils Eurule existants après le changement de marque", () => {
+  const legacyBundle = { schema: "eurule-checklink-profile", version: 1, profile: DEFAULT_PROFILE };
+  const imported = parseProfileBundle(legacyBundle);
+  assert.equal(imported.companyName, DEFAULT_PROFILE.companyName);
+  assert.equal(imported.vatId, DEFAULT_PROFILE.vatId);
+});
+
 test("génère un slug et un lien partageable", () => {
   assert.equal(profileSlug("École des Arts & Métiers"), "ecole-des-arts-metiers");
-  const link = createCheckLink(DEFAULT_PROFILE, { origin: "https://eurule.test", pathname: "/app" });
-  assert.match(link, /^https:\/\/eurule\.test\/app#check\/atelier-nova\//);
+  const link = createCheckLink(DEFAULT_PROFILE, { origin: "https://settlemesh.test", pathname: "/app" });
+  assert.match(link, /^https:\/\/settlemesh\.test\/app#check\/atelier-nova\//);
   assert.ok(decodeProfile(link.split("/").at(-1)));
 });
 
@@ -79,11 +86,11 @@ test("produit un rapport lisible", () => {
     taxExclusive: 10, taxAmount: 2, taxInclusive: 12, payableAmount: 12, lineCount: 1
   }, DEFAULT_PROFILE);
   const text = exportResultText(result);
-  assert.match(text, /EURULE CHECKLINK/);
+  assert.match(text, /SETTLEMESH CHECKLINK/);
   assert.match(text, /INV-3/);
   assert.match(text, /Score/);
   const json = JSON.parse(exportResultJson(result));
-  assert.equal(json.schema, "eurule-validation-report");
+  assert.equal(json.schema, "settlemesh-validation-report");
   assert.equal(json.result.invoice.invoiceNumber, "INV-3");
 
   const csv = exportHistoryCsv([result]);

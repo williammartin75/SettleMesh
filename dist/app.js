@@ -17,8 +17,8 @@ import {
 import { extractFacturXXml } from "./facturx.js";
 import { createNettingDemo, exportNettingCsv, nettingCsvTemplate, parseNettingCsv, simulateNetting } from "./netting.js";
 import { validateEuropeanStandard } from "./standards.js";
+import { readPersistedState, writePersistedState } from "./storage.js";
 
-const STORAGE_KEY = "eurule-checklink-v1";
 const TITLES = {
   overview: ["CHECKLINK", "Vue d’ensemble"],
   profile: ["CONFIGURATION", "Mon CheckLink"],
@@ -32,12 +32,13 @@ const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)]
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 function loadState() {
+  const persisted = readPersistedState(localStorage);
+  const saved = persisted.value;
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     const profile = { ...clone(DEFAULT_PROFILE), ...(saved?.profile || {}) };
     if (profile.peppolId === "0009:123456789") profile.peppolId = DEFAULT_PROFILE.peppolId;
     if (profile.vatId === "FR40123456789") profile.vatId = DEFAULT_PROFILE.vatId;
-    return {
+    const loaded = {
       profile,
       history: Array.isArray(saved?.history) ? saved.history.slice(0, 100) : [],
       lastResult: saved?.lastResult || null,
@@ -46,6 +47,8 @@ function loadState() {
         source: saved?.netting?.source || ""
       }
     };
+    if (persisted.migrated) writePersistedState(localStorage, loaded);
+    return loaded;
   } catch {
     return { profile: clone(DEFAULT_PROFILE), history: [], lastResult: null, netting: { obligations: [], source: "" } };
   }
@@ -65,7 +68,7 @@ function formatDate(value) { return new Intl.DateTimeFormat("fr-FR", { dateStyle
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]); }
 
 function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ profile: state.profile, history: state.history, lastResult: state.lastResult, netting: state.netting }));
+  writePersistedState(localStorage, { profile: state.profile, history: state.history, lastResult: state.lastResult, netting: state.netting });
 }
 
 function toast(title, detail = "") {
@@ -320,8 +323,8 @@ function renderResult(result) {
   $("#result-summary").innerHTML = `<div><span class="section-label">${escapeHtml(result.id)}</span><h3>${escapeHtml(summary.label)}</h3><p>${escapeHtml(summary.headline)}</p></div><div class="score-orb"><strong>${result.score}</strong><span>sur 100</span></div>`;
   $("#checks-list").innerHTML = result.checks.map((item) => `<article class="check-row ${item.status}"><span class="check-status">${item.status === "pass" ? "✓" : item.status === "error" ? "×" : item.status === "warning" ? "!" : "i"}</span><div><h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.message)}</p>${item.fix ? `<div class="fix"><strong>Comment corriger :</strong> ${escapeHtml(item.fix)}</div>` : ""}</div><span class="field-code">${escapeHtml(item.field)}</span></article>`).join("");
   $("#result-side").innerHTML = `<span class="section-label">Document analysé</span><h3>${escapeHtml(result.invoice.invoiceNumber || "Sans numéro")}</h3><div class="result-fact"><span>Fournisseur</span><strong>${escapeHtml(result.invoice.supplierName || "Non lu")}</strong></div><div class="result-fact"><span>Destinataire</span><strong>${escapeHtml(result.invoice.buyerName || "Non lu")}</strong></div><div class="result-fact"><span>Format</span><strong>${escapeHtml(result.invoice.container === "FACTUR-X" ? "Factur-X · CII" : result.invoice.syntax)}</strong></div><div class="result-fact"><span>Norme</span><strong>EN 16931 ${escapeHtml(result.standards?.en16931 || "précontrôle")}</strong></div><div class="result-fact"><span>Montant</span><strong>${result.invoice.payableAmount != null ? `${result.invoice.payableAmount.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} ${escapeHtml(result.invoice.currency)}` : "Non lu"}</strong></div><button class="button primary full" type="button" id="download-report">Rapport lisible</button><button class="button secondary full" type="button" id="download-json-report">Rapport JSON</button><button class="button ghost full" type="button" id="new-check">Contrôler une autre facture</button><p class="disclaimer">Validation automatisée des artefacts indiqués, complétée par les exigences du destinataire. Ne constitue pas un avis juridique.</p>`;
-  $("#download-report").addEventListener("click", () => download(`eurule-${result.invoice.invoiceNumber || result.id}.txt`, exportResultText(result)));
-  $("#download-json-report").addEventListener("click", () => download(`eurule-${result.invoice.invoiceNumber || result.id}.json`, exportResultJson(result), "application/json;charset=utf-8"));
+  $("#download-report").addEventListener("click", () => download(`settlemesh-${result.invoice.invoiceNumber || result.id}.txt`, exportResultText(result)));
+  $("#download-json-report").addEventListener("click", () => download(`settlemesh-${result.invoice.invoiceNumber || result.id}.json`, exportResultJson(result), "application/json;charset=utf-8"));
   $("#new-check").addEventListener("click", () => { area.hidden = true; $("#upload-panel").scrollIntoView({ behavior: "smooth" }); });
   area.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -455,7 +458,7 @@ function setupEvents() {
   });
   $("#export-profile").addEventListener("click", () => {
     const name = state.profile.companyName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "entreprise";
-    download(`eurule-profil-${name}.json`, JSON.stringify(createProfileBundle(state.profile), null, 2), "application/json;charset=utf-8");
+    download(`settlemesh-profil-${name}.json`, JSON.stringify(createProfileBundle(state.profile), null, 2), "application/json;charset=utf-8");
     toast("Profil exporté", "Le fichier peut être sauvegardé ou transféré à un collègue.");
   });
   $("#import-profile").addEventListener("click", () => $("#profile-import-file").click());
@@ -487,11 +490,11 @@ function setupEvents() {
   $("#batch-export").addEventListener("click", () => {
     const results = currentBatch.flatMap((entry) => entry.result ? [entry.result] : []);
     if (!results.length) return toast("Aucun résultat à exporter", "Le lot ne contient aucune facture analysée.");
-    download(`eurule-lot-${new Date().toISOString().slice(0, 10)}.csv`, exportHistoryCsv(results), "text/csv;charset=utf-8");
+    download(`settlemesh-lot-${new Date().toISOString().slice(0, 10)}.csv`, exportHistoryCsv(results), "text/csv;charset=utf-8");
   });
   $("#export-history").addEventListener("click", () => {
     if (!state.history.length) return toast("Historique vide", "Effectuez au moins un contrôle avant l’export.");
-    download(`eurule-historique-${new Date().toISOString().slice(0, 10)}.csv`, exportHistoryCsv(state.history), "text/csv;charset=utf-8");
+    download(`settlemesh-historique-${new Date().toISOString().slice(0, 10)}.csv`, exportHistoryCsv(state.history), "text/csv;charset=utf-8");
   });
   $("#history-search").addEventListener("input", (event) => { historyQuery = event.target.value; renderHistory(); });
   $("#history-outcome").addEventListener("change", (event) => { historyOutcome = event.target.value; renderHistory(); });

@@ -40,7 +40,7 @@ function parseSvrl(serialized, label, prefix) {
     checks.push({
       id: `${prefix}-more`, status: "error", title: `${failures.length - checks.length} autres règles non respectées`,
       message: "Le rapport est volontairement condensé pour rester lisible.",
-      fix: "Téléchargez le rapport Eurule ou corrigez les premières anomalies avant de relancer le contrôle.", field: label
+      fix: "Téléchargez le rapport SettleMesh ou corrigez les premières anomalies avant de relancer le contrôle.", field: label
     });
   }
 
