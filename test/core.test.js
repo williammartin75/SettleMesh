@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DOMParser } from "@xmldom/xmldom";
 import {
   DEFAULT_PROFILE,
   appendValidationChecks,
@@ -11,12 +12,18 @@ import {
   exportResultJson,
   encodeProfile,
   exportResultText,
+  parseInvoiceXml,
   parseProfileBundle,
   profileCompleteness,
   profileSlug,
   resultSummary,
   validateInvoice
 } from "../dist/core.js";
+
+test("refuse un DOCTYPE avant le parsing XML dans le navigateur", () => {
+  const malicious = '<!DOCTYPE Invoice [<!ENTITY secret SYSTEM "file:///etc/passwd">]><Invoice>&secret;</Invoice>';
+  assert.throws(() => parseInvoiceXml(malicious, DOMParser), /DOCTYPE/);
+});
 
 test("encode et décode un profil CheckLink", () => {
   const decoded = decodeProfile(encodeProfile(DEFAULT_PROFILE));
@@ -52,6 +59,13 @@ test("génère un slug et un lien partageable", () => {
 test("calcule la complétude du profil", () => {
   assert.equal(profileCompleteness(DEFAULT_PROFILE), 100);
   assert.ok(profileCompleteness({ ...DEFAULT_PROFILE, vatId: "", instructions: "" }) < 100);
+});
+
+test("résume un résultat d’historique compact sans détail des contrôles", () => {
+  const summary = resultSummary({ outcome: "blocked", counts: { error: 2 } });
+  assert.equal(summary.label, "Correction requise");
+  assert.match(summary.headline, /2 anomalies bloquantes/);
+  assert.deepEqual(summary.blockers, []);
 });
 
 test("bloque une facture visant la mauvaise entité", () => {

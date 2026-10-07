@@ -25,7 +25,7 @@ import {
 } from "./metrics.js";
 import { createNettingDemo, exportNettingCsv, nettingCsvTemplate, parseNettingCsv, simulateNetting } from "./netting.js";
 import { validateEuropeanStandard } from "./standards.js";
-import { readPersistedState, writePersistedState } from "./storage.js";
+import { compactHistory, createPersistedState, readPersistedState, writePersistedState } from "./storage.js";
 
 const TITLES = {
   overview: ["CHECKLINK", "Vue d’ensemble"],
@@ -46,7 +46,7 @@ function loadState() {
     const profile = { ...clone(DEFAULT_PROFILE), ...(saved?.profile || {}) };
     if (profile.peppolId === "0009:123456789") profile.peppolId = DEFAULT_PROFILE.peppolId;
     if (profile.vatId === "FR40123456789") profile.vatId = DEFAULT_PROFILE.vatId;
-    const history = Array.isArray(saved?.history) ? saved.history.slice(0, 100) : [];
+    const history = compactHistory(saved?.history);
     const loaded = {
       profile,
       history,
@@ -57,7 +57,7 @@ function loadState() {
         source: saved?.netting?.source || ""
       }
     };
-    if (persisted.migrated || !saved?.metrics) writePersistedState(localStorage, loaded);
+    writePersistedState(localStorage, createPersistedState(loaded));
     return loaded;
   } catch {
     return { profile: clone(DEFAULT_PROFILE), history: [], lastResult: null, metrics: normalizeLocalMetrics(null), netting: { obligations: [], source: "" } };
@@ -78,7 +78,7 @@ function formatDate(value) { return new Intl.DateTimeFormat("fr-FR", { dateStyle
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]); }
 
 function persist() {
-  writePersistedState(localStorage, { profile: state.profile, history: state.history, lastResult: state.lastResult, metrics: state.metrics, netting: state.netting });
+  writePersistedState(localStorage, createPersistedState(state));
 }
 
 function toast(title, detail = "") {

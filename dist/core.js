@@ -157,6 +157,7 @@ export function createCheckLink(profile, locationLike = globalThis.location) {
 export function parseInvoiceXml(xmlText, Parser = globalThis.DOMParser) {
   const raw = String(xmlText || "").trim();
   if (!raw) throw new Error("Le fichier est vide.");
+  if (/<!DOCTYPE/i.test(raw)) throw new Error("Les déclarations DOCTYPE ne sont pas acceptées.");
   if (typeof Parser !== "function") throw new Error("Le parseur XML est indisponible dans cet environnement.");
   const document = new Parser().parseFromString(raw, "application/xml");
   const parserErrors = document.getElementsByTagNameNS?.("*", "parsererror") || [];
@@ -335,12 +336,13 @@ export function appendValidationChecks(result, checks, metadata = {}) {
 
 export function resultSummary(result) {
   const label = result.outcome === "ready" ? "Prête à envoyer" : result.outcome === "review" ? "À vérifier" : "Correction requise";
-  const blockers = result.checks.filter((item) => item.status === "error");
+  const blockers = Array.isArray(result.checks) ? result.checks.filter((item) => item.status === "error") : [];
+  const blockerCount = Array.isArray(result.checks) ? blockers.length : Math.max(0, Number(result.counts?.error) || 0);
   return {
     label, blockers,
     headline: result.outcome === "ready" ? "La facture respecte les contrôles configurés."
       : result.outcome === "review" ? "La facture peut avancer après une vérification rapide."
-        : `${blockers.length} anomalie${blockers.length > 1 ? "s bloquantes" : " bloquante"} à corriger avant l’envoi.`
+        : `${blockerCount} anomalie${blockerCount > 1 ? "s bloquantes" : " bloquante"} à corriger avant l’envoi.`
   };
 }
 

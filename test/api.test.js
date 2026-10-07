@@ -38,6 +38,10 @@ test("expose la santé et les versions de l’API v1", () => withServer(async (b
   assert.equal(body.authentication.configured, true);
   assert.equal(body.persistence, false);
   assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("cross-origin-resource-policy"), "same-origin");
 }));
 
 test("valide un UBL conforme sans renvoyer ni stocker le XML", () => withServer(async (baseUrl) => {
@@ -150,4 +154,15 @@ test("refuse une requête dépassant la limite documentée", () => withServer(as
   const body = await response.json();
   assert.equal(response.status, 413);
   assert.equal(body.error.code, "BODY_TOO_LARGE");
+}));
+
+test("refuse les méthodes statiques et les traversées de répertoire", () => withServer(async (baseUrl) => {
+  const method = await fetch(`${baseUrl}/`, { method: "POST" });
+  assert.equal(method.status, 405);
+  assert.equal(method.headers.get("allow"), "GET, HEAD");
+
+  const traversal = await fetch(`${baseUrl}/..%2fpackage.json`);
+  assert.equal(traversal.status, 404);
+  assert.equal(await traversal.text(), "Not found");
+  assert.equal(traversal.headers.get("x-frame-options"), "DENY");
 }));

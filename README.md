@@ -14,7 +14,7 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - exécution locale des règles Peppol BIS Billing 3.0.21 pour les documents UBL Peppol ;
 - contrôles du destinataire, de la TVA, de l’adresse électronique, du numéro de commande et des totaux ;
 - diagnostic détaillé avec références EN 16931 `BT-*` ;
-- rapport téléchargeable et historique local ;
+- rapport téléchargeable et historique local minimisé, limité à 100 entrées et 30 jours ;
 - contrôle en lot de 20 factures avec synthèse consolidée ;
 - exports de rapports lisibles, JSON et CSV pour intégration dans un workflow ;
 - recherche et filtrage de l’historique local ;
@@ -28,6 +28,8 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - export JSON volontaire de ces métriques, sans contenu, identifiant, montant ou fournisseur de facture ;
 - interface fournisseur utilisable sans compte ;
 - aucune transmission serveur depuis l'interface navigateur, aucune télémétrie automatique et aucune persistance dans l'API pilote.
+
+Le modèle de menace, l'inventaire des données, la revue OWASP/RGPD préliminaire et les portes de mise en production sont documentés dans [`docs/SECURITY.md`](./docs/SECURITY.md).
 
 ## Utilisation locale
 
@@ -43,7 +45,7 @@ Puis ouvrir `http://127.0.0.1:4173`.
 
 La commande `api:key` affiche une clé une seule fois et l'objet de configuration contenant uniquement son hash SHA-256. Placer cet objet dans la variable `SETTLEMESH_API_KEYS` avant de lancer le serveur. Aucun secret ne doit être ajouté au dépôt ou au CheckLink.
 
-Le serveur local expose également `GET /api/v1/health` et `POST /api/v1/validate`. Le contrat, les exemples et les limites de sécurité sont décrits dans [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Cette API pilote n'est pas incluse dans l'hébergement statique. Les clés et quotas sont encore configurés en mémoire : un gestionnaire de secrets, une révocation persistante, TLS et une revue de sécurité restent nécessaires avant une exposition Internet.
+Le serveur local expose également `GET /api/v1/health` et `POST /api/v1/validate`. Le contrat, les exemples et les limites de sécurité sont décrits dans [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Cette API pilote n'est pas incluse dans l'hébergement statique. Les clés et quotas sont encore configurés en mémoire : malgré la revue interne initiale, un gestionnaire de secrets, une révocation persistante, TLS, des contrôles d'infrastructure et un pentest externe restent nécessaires avant une exposition Internet.
 
 ## Démonstration
 
@@ -54,7 +56,7 @@ Dans **Tester une facture**, utiliser :
 
 Il est aussi possible de déposer jusqu’à 20 fichiers en une fois. Le tableau de synthèse ouvre ensuite le diagnostic détaillé de chaque facture et s’exporte en CSV.
 
-Dans **Mon CheckLink**, le profil peut être exporté en JSON puis réimporté dans un autre navigateur. Dans **Contrôles**, l’historique peut être recherché, filtré et exporté en CSV.
+Dans **Mon CheckLink**, le profil peut être exporté en JSON puis réimporté dans un autre navigateur. Dans **Contrôles**, l’historique peut être recherché, filtré et exporté en CSV. Il est conservé uniquement dans le navigateur, pendant 30 jours et dans la limite de 100 résultats ; le diagnostic détaillé reste limité à la session courante.
 
 La **Vue d’ensemble** contient aussi un bloc « Mesure pilote ». Ses compteurs sont enregistrés dans le navigateur, séparément de l’historique limité à 100 résultats. Ils peuvent être exportés volontairement en JSON ou remis à zéro sans supprimer l’historique. Cet export ne contient pas le XML, les numéros de facture, les fournisseurs, les montants ni les identifiants fiscaux.
 

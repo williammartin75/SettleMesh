@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.7.0` |
-| État | MVP fonctionnel avec interface statique, métriques pilote agrégées locales et API locale authentifiée par organisation ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.8.0` |
+| État | MVP fonctionnel durci après revue sécurité/RGPD interne, avec interface statique, métriques pilote agrégées locales et API locale authentifiée par organisation ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 7 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Site statique dont la racine de publication est `dist/` ; l'API Node n'est pas déployée par cet hébergement |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 38 tests au 7 octobre 2026 |
+| Tests automatisés | 43 tests au 7 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -139,7 +139,7 @@ Légende :
 | Résultat | Score, statut et corrections | Opérationnel | Score produit, pas une certification officielle |
 | Lots | Jusqu'à 20 fichiers, 20 Mo chacun | Opérationnel | Traitement séquentiel dans le navigateur |
 | Rapports | TXT, JSON et CSV | Opérationnel | Pas de signature ni piste d'audit serveur |
-| Historique | Recherche, filtre et suppression locale | Opérationnel | 100 résultats maximum dans le navigateur |
+| Historique | Recherche, filtre, export et suppression locale | Opérationnel | Champs minimisés, 100 résultats et 30 jours maximum dans le navigateur ; diagnostic détaillé limité à la session |
 | Mesure pilote | Compteurs d’activation agrégés, export JSON et remise à zéro | Opérationnel | Stockage local uniquement ; aucune ouverture externe ou correction inter-session mesurable sans télémétrie consentie |
 | Intégration | API de validation `/api/v1` | Partiel | Endpoint local authentifié par clé d'organisation ; secrets, quotas et audit persistants ainsi que déploiement de production absents |
 | Netting | Import CSV d'obligations | Opérationnel | 2 Mo et 500 obligations conservées localement |
@@ -306,7 +306,7 @@ Rôle : rendre les validations locales retrouvables et exportables.
 
 Fonctions :
 
-- 100 résultats maximum, les plus récents en premier ;
+- 100 résultats maximum et 30 jours de rétention, les plus récents en premier ;
 - recherche sur facture, fournisseur et données associées ;
 - filtre par résultat ;
 - score et date ;
@@ -458,7 +458,8 @@ SettleMesh/
 │   └── validation.mjs           validation serveur EN 16931 / Peppol
 ├── docs/
 │   ├── API.md                   guide humain d'intégration
-│   └── openapi.yaml             contrat OpenAPI 3.1
+│   ├── openapi.yaml             contrat OpenAPI 3.1
+│   └── SECURITY.md              revue OWASP/RGPD, modèle de menace et portes de production
 └── vendor/                      sources et licences normatives
 ```
 
@@ -468,13 +469,14 @@ Clé `localStorage` : `settlemesh-v1`. Au premier chargement, l'application rech
 
 ```text
 profile      configuration de réception de l'entreprise
-history      jusqu'à 100 résultats sans XML brut
-lastResult   dernier résultat affichable
+history      historique compact, 100 résultats et 30 jours maximum, sans XML ni détail des contrôles
 metrics      compteurs d’activation agrégés, sans contenu ni identifiant de facture
 netting
   obligations  jusqu'à 500 obligations normalisées
   source       nom descriptif du registre chargé
 ```
+
+`lastResult`, le dernier diagnostic détaillé, reste uniquement en mémoire pendant la session et n'est jamais écrit dans `localStorage`.
 
 ### 7.2 Modèle de partage CheckLink
 
@@ -494,7 +496,7 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 
 Le serveur local expose `GET /api/v1/health` et `POST /api/v1/validate`. La validation reçoit un JSON contenant le XML, un profil optionnel et un nom de source. Elle exige une clé Bearer dont seul le hash SHA-256 est configuré côté serveur, détermine l'organisation depuis cette clé, puis exécute les contrôles produit, EN 16931 et, si applicable, Peppol. La réponse ne contient pas le XML brut et porte `stored: false`.
 
-Limites : corps HTTP de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé elle reste fermée. Elle n'ouvre pas CORS et n'est pas déployée avec le site statique. Les secrets, révocations et quotas ne sont pas encore persistants. Le contrat de référence est `docs/openapi.yaml`.
+Limites : corps HTTP de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé elle reste fermée. Elle n'ouvre pas CORS et n'est pas déployée avec le site statique. Le serveur applique CSP, anti-frame, `nosniff`, politiques referrer/permissions et isolation cross-origin. Les secrets, révocations et quotas ne sont pas encore persistants. Le contrat de référence est `docs/openapi.yaml`.
 
 ## 8. Invariants à ne jamais casser
 
@@ -510,6 +512,7 @@ Limites : corps HTTP de 2 Mo, XML de 1 Mo, protection générale de 120 requête
 
 - L'interface navigateur ne transmet pas le contenu des factures à un backend SettleMesh ; seul un client intégrateur appelle explicitement l'API locale.
 - Le XML brut ne doit pas entrer dans l'historique persistant.
+- Le diagnostic détaillé ne doit pas être persisté ; l'historique est limité à une liste blanche de champs, 100 entrées et 30 jours.
 - L'API ne doit ni persister, ni renvoyer, ni journaliser le XML brut.
 - Une clé API brute ne doit jamais être enregistrée dans le dépôt, le CheckLink, les logs ou une réponse ; seul son hash peut être configuré côté serveur.
 - L'organisation d'une requête API doit être déterminée par le serveur depuis la clé authentifiée, jamais acceptée depuis le corps client.
@@ -539,9 +542,15 @@ Limites : corps HTTP de 2 Mo, XML de 1 Mo, protection générale de 120 requête
 
 ### 9.1 Position actuelle
 
-SettleMesh v0.7 fournit un précontrôle technique, des métriques pilote agrégées locales, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
+SettleMesh v0.8 fournit un précontrôle technique, des métriques pilote agrégées locales, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
 
-### 9.2 Analyse obligatoire avant un pilote de compensation réelle
+### 9.2 Revue sécurité et RGPD interne
+
+La revue du 7 octobre 2026 est consignée dans `docs/SECURITY.md`. Elle couvre le frontend statique, le stockage navigateur, les imports non fiables, l'API locale, les dépendances, les actifs, frontières de confiance, menaces et portes de production. La version `0.8.0` ajoute une CSP, des protections anti-frame et cross-origin sur le serveur, le rejet des `DOCTYPE` côté navigateur, ainsi qu'une liste blanche et une rétention de 30 jours pour l'historique persistant. `npm audit` ne signale aucune vulnérabilité connue à la date de la revue.
+
+Cette revue est interne et préliminaire. Elle ne vaut ni pentest indépendant, ni analyse juridique, ni validation RGPD. Comptes, rôles, TLS de production, gestionnaire de secrets, révocation, quotas persistants, chiffrement au repos et procédure d'incident testée restent des prérequis avant des données réelles partagées.
+
+### 9.3 Analyse obligatoire avant un pilote de compensation réelle
 
 - droit applicable à la compensation conventionnelle dans chaque pays visé ;
 - opposabilité, date d'effet et preuve de l'accord ;
@@ -553,7 +562,7 @@ SettleMesh v0.7 fournit un précontrôle technique, des métriques pilote agrég
 - RGPD, sous-traitance, durées de conservation et hébergement ;
 - responsabilité contractuelle liée aux calculs.
 
-### 9.3 Principe d'architecture cible
+### 9.4 Principe d'architecture cible
 
 SettleMesh calcule et orchestre. Un partenaire réglementé exécute le mouvement de fonds résiduel. Toute évolution s'écartant de ce principe doit être explicitement décidée, analysée et ajoutée au journal des décisions.
 
@@ -641,9 +650,9 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 38 tests
+### 12.2 Couverture actuelle des 43 tests
 
-`test/core.test.js` — 11 tests :
+`test/core.test.js` — 13 tests :
 
 - encodage et décodage du profil ;
 - export et réimport d'un profil portable ;
@@ -655,7 +664,9 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - rapport lisible ;
 - cohérence des exemples UBL ;
 - rejet des placeholders de commande ;
-- intégration des contrôles officiels dans le score.
+- intégration des contrôles officiels dans le score ;
+- rejet d'un `DOCTYPE` avant parsing XML côté navigateur ;
+- résumé compatible avec un historique compact sans détail des contrôles.
 
 `test/netting.test.js` — 5 tests :
 
@@ -671,10 +682,12 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - détection d'un total TTC erroné ;
 - extraction et validation du CII embarqué dans un vrai PDF Factur-X.
 
-`test/storage.test.js` — 2 tests :
+`test/storage.test.js` — 4 tests :
 
 - récupération et réécriture d'une sauvegarde locale Eurule sous la clé SettleMesh ;
-- priorité de la sauvegarde courante et repli sur une ancienne sauvegarde valide si la nouvelle est illisible.
+- priorité de la sauvegarde courante et repli sur une ancienne sauvegarde valide si la nouvelle est illisible ;
+- minimisation de l'historique et purge des résultats de plus de 30 jours ;
+- absence de persistance du dernier diagnostic détaillé.
 
 `test/metrics.test.js` — 4 tests :
 
@@ -683,7 +696,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - export JSON à liste blanche avec garanties de confidentialité explicites ;
 - normalisation et bornage d’une sauvegarde altérée.
 
-`test/api.test.js` — 10 tests :
+`test/api.test.js` — 11 tests :
 
 - santé, version et absence de persistance ;
 - validation complète d'un UBL sans restitution du XML ;
@@ -694,7 +707,8 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - refus d'une clé absente ou invalide ;
 - fermeture de l'API quand aucune clé n'est configurée ;
 - isolation du quota par organisation ;
-- rejet des requêtes dépassant la taille maximale.
+- rejet des requêtes dépassant la taille maximale ;
+- en-têtes de sécurité, refus des méthodes statiques non prévues et des traversées de répertoire.
 
 `test/auth.test.js` — 3 tests :
 
@@ -731,7 +745,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - [ ] Vérifier la conformité PDF/A-3 de Factur-X, pas seulement le XML embarqué.
 - [ ] Ajouter VIES et Peppol Directory avec états `vérifié`, `indisponible`, `non vérifié` distincts.
 - [x] Instrumenter localement les métriques d'activation sans collecter le contenu ni les identifiants des factures ; toute télémétrie serveur reste soumise à consentement et analyse RGPD.
-- [ ] Réaliser revue sécurité, RGPD et modèle de menace.
+- [x] Réaliser une revue sécurité/RGPD interne et un modèle de menace OWASP ; le pentest et les validations juridique/RGPD externes restent obligatoires avant production.
 - [ ] Obtenir 3 à 5 entreprises pilotes et mesurer les rejets évités.
 
 ### P1 — transformer Net en workflow collaboratif
@@ -777,13 +791,13 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Faux sentiment de conformité | Critique | Sources/version visibles, avertissements et limites explicites |
 | Mauvaise compensation | Critique | Invariants testés, allocation facture, accord requis, aucune exécution automatique |
 | Créance cédée ou litigieuse incluse | Critique | Champs d'exclusion aujourd'hui ; vérification et preuves à construire |
-| Fuite de données de facturation | Critique | Traitement local MVP ; architecture sécurité/RGPD avant serveur |
+| Fuite de données de facturation | Critique | Traitement local, historique à liste blanche sur 30 jours, CSP et modèle de menace ; architecture serveur, chiffrement, droits et audit externe avant données réelles partagées |
 | Règles officielles obsolètes | Élevé | Versions affichées, artefacts vendoriés, processus de mise à jour à instaurer |
 | Identités d'entreprises ambiguës | Élevé | Normalisation simple aujourd'hui ; KYB et identifiants légaux demain |
 | CSV incorrect ou malveillant | Moyen | Limites, validation, échappement HTML et neutralisation des formules |
 | Métriques pilote interprétées comme audience globale | Moyen | Libellés « local », export volontaire et distinction explicite entre CheckLink copié et ouverture externe non mesurée |
 | Réapparition de l'ancienne marque Eurule | Faible | SettleMesh est la marque mère depuis v0.4 ; les anciens profils et données locales restent importables uniquement pour compatibilité |
-| Compromission ou mauvaise isolation d'une clé API pilote | Critique | Clés fortes, hashes uniquement, comparaison constante, organisation côté serveur, rotation et quotas en mémoire ; ne pas déployer avant gestionnaire de secrets, révocation, quotas persistants et revue sécurité |
+| Compromission ou mauvaise isolation d'une clé API pilote | Critique | Clés fortes, hashes uniquement, comparaison constante, organisation côté serveur, rotation et quotas en mémoire ; ne pas déployer avant gestionnaire de secrets, révocation, quotas persistants et pentest externe |
 
 ## 15. Journal des décisions
 
@@ -801,6 +815,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-07 | Versionner l'intégration de validation sous `/api/v1` | Offrir une surface stable aux ERP sans modifier le parcours CheckLink | XML transmis uniquement sur appel API explicite, non persisté, API locale tant que l'infrastructure de production manque |
 | 2026-10-07 | Authentifier l'API pilote par clé hashée rattachée à une organisation | Fermer l'endpoint par défaut et préparer une facturation/quota par client sans stocker de compte utilisateur | Clé brute affichée une fois, organisation dérivée côté serveur, rotation possible ; identité humaine et persistance restent hors périmètre |
 | 2026-10-07 | Mesurer l’activation par agrégats locaux exportables | Donner aux pilotes et investisseurs des preuves d’usage sans transmettre le contenu des factures | Compteurs à liste blanche dans le navigateur ; aucune télémétrie réseau ni mesure des ouvertures externes sans consentement |
+| 2026-10-07 | Durcir le MVP après revue sécurité/RGPD interne | Réduire l'exposition locale et rendre les risques de production explicites sans promettre une conformité juridique | Historique compact sur 30 jours, diagnostic détaillé non persistant, CSP et anti-frame, modèle de menace documenté ; audit externe toujours requis |
 
 ## 16. Questions ouvertes à trancher
 
