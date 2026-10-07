@@ -24,8 +24,10 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - calcul du volume compensable, des positions nettes et des paiements résiduels ;
 - export CSV des propositions de compensation et des factures mobilisées ;
 - API locale versionnée `/api/v1`, protégée par clé Bearer rattachée à une organisation, pour intégrer la validation UBL/CII dans un ERP ou un logiciel de facturation ;
+- tableau d’impact pilote avec métriques agrégées locales : CheckLinks copiés, fichiers soumis, taux analysable, taux prêt et temps moyen ;
+- export JSON volontaire de ces métriques, sans contenu, identifiant, montant ou fournisseur de facture ;
 - interface fournisseur utilisable sans compte ;
-- aucune transmission serveur depuis l'interface navigateur et aucune persistance dans l'API pilote.
+- aucune transmission serveur depuis l'interface navigateur, aucune télémétrie automatique et aucune persistance dans l'API pilote.
 
 ## Utilisation locale
 
@@ -53,6 +55,8 @@ Dans **Tester une facture**, utiliser :
 Il est aussi possible de déposer jusqu’à 20 fichiers en une fois. Le tableau de synthèse ouvre ensuite le diagnostic détaillé de chaque facture et s’exporte en CSV.
 
 Dans **Mon CheckLink**, le profil peut être exporté en JSON puis réimporté dans un autre navigateur. Dans **Contrôles**, l’historique peut être recherché, filtré et exporté en CSV.
+
+La **Vue d’ensemble** contient aussi un bloc « Mesure pilote ». Ses compteurs sont enregistrés dans le navigateur, séparément de l’historique limité à 100 résultats. Ils peuvent être exportés volontairement en JSON ou remis à zéro sans supprimer l’historique. Cet export ne contient pas le XML, les numéros de facture, les fournisseurs, les montants ni les identifiants fiscaux.
 
 ## SettleMesh Net
 

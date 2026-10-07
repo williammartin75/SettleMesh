@@ -37,7 +37,7 @@
         <span class="trust-icon">◎</span>
         <div><strong>Analyse locale</strong><small>Les factures restent dans ce navigateur.</small></div>
       </div>
-      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.6</strong></div>
+      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.7</strong></div>
     </aside>
 
     <main class="main">
@@ -73,6 +73,21 @@
             <article class="metric"><span>Factures prêtes</span><strong id="metric-ready">0</strong><small id="metric-ready-rate">Aucun contrôle</small></article>
             <article class="metric accent"><span>Anomalies évitées</span><strong id="metric-errors">0</strong><small>avant transmission</small></article>
           </div>
+
+          <article class="panel pilot-metrics-panel">
+            <div class="panel-head pilot-metrics-head">
+              <div><span class="section-label">Mesure pilote · locale</span><h3>Prouvez l’activation sans exposer les factures.</h3><p>SettleMesh conserve uniquement des compteurs agrégés dans ce navigateur. L’export reste une action volontaire.</p></div>
+              <div class="pilot-metrics-actions"><button class="button secondary" id="export-pilot-metrics" type="button">Exporter JSON</button><button class="button ghost" id="reset-pilot-metrics" type="button">Réinitialiser</button></div>
+            </div>
+            <div class="pilot-metrics-grid">
+              <div><span>CheckLinks copiés</span><strong id="pilot-link-copies">0</strong><small>signal de partage</small></div>
+              <div><span>Fichiers soumis</span><strong id="pilot-files">0</strong><small>y compris les échecs de lecture</small></div>
+              <div><span>Taux analysable</span><strong id="pilot-readable-rate">—</strong><small>documents ayant produit un diagnostic</small></div>
+              <div><span>Diagnostics prêts</span><strong id="pilot-ready-rate">—</strong><small>part des diagnostics sans erreur ni alerte</small></div>
+              <div><span>Temps moyen local</span><strong id="pilot-average-time">—</strong><small>par lancement de contrôle</small></div>
+            </div>
+            <div class="pilot-privacy"><span>◎</span><div><strong>Aucune télémétrie réseau</strong><small>Aucun XML, numéro de facture, fournisseur, montant ou identifiant n’entre dans ces métriques.</small></div><small id="pilot-period">Période locale en cours</small></div>
+          </article>
 
           <article class="netting-banner">
             <div><span class="section-label">Nouveau · Upsell trésorerie</span><h3>Transformez les factures validées en cash économisé.</h3><p>SettleMesh Net détecte les dettes réciproques et les cycles de compensation entre partenaires, sans déplacer de fonds.</p></div>

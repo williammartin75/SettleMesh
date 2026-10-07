@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.6.0` |
-| État | MVP fonctionnel avec interface statique et API locale authentifiée par organisation ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.7.0` |
+| État | MVP fonctionnel avec interface statique, métriques pilote agrégées locales et API locale authentifiée par organisation ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 7 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Site statique dont la racine de publication est `dist/` ; l'API Node n'est pas déployée par cet hébergement |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 34 tests au 7 octobre 2026 |
+| Tests automatisés | 38 tests au 7 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -140,6 +140,7 @@ Légende :
 | Lots | Jusqu'à 20 fichiers, 20 Mo chacun | Opérationnel | Traitement séquentiel dans le navigateur |
 | Rapports | TXT, JSON et CSV | Opérationnel | Pas de signature ni piste d'audit serveur |
 | Historique | Recherche, filtre et suppression locale | Opérationnel | 100 résultats maximum dans le navigateur |
+| Mesure pilote | Compteurs d’activation agrégés, export JSON et remise à zéro | Opérationnel | Stockage local uniquement ; aucune ouverture externe ou correction inter-session mesurable sans télémétrie consentie |
 | Intégration | API de validation `/api/v1` | Partiel | Endpoint local authentifié par clé d'organisation ; secrets, quotas et audit persistants ainsi que déploiement de production absents |
 | Netting | Import CSV d'obligations | Opérationnel | 2 Mo et 500 obligations conservées localement |
 | Netting | Compensation bilatérale | Opérationnel | Simulation seulement, accord requis |
@@ -169,6 +170,8 @@ Rôle : cockpit de l'entreprise destinataire et point d'entrée vers les deux bo
 - nombre de contrôles locaux ;
 - nombre et taux de factures prêtes ;
 - nombre d'anomalies évitées ;
+- impact pilote agrégé : CheckLinks copiés, fichiers soumis, taux analysable, taux prêt et temps moyen ;
+- export JSON volontaire et remise à zéro des métriques locales ;
 - CheckLink copiable ;
 - état des éléments de préparation ;
 - aperçu de l'expérience fournisseur ;
@@ -431,6 +434,7 @@ SettleMesh/
 │   ├── core.js                  profil, parsing et validation métier facture
 │   ├── facturx.js               extraction du XML embarqué dans un PDF
 │   ├── standards.js             exécution EN 16931 et Peppol
+│   ├── metrics.js               agrégats d’activation locaux et export à liste blanche
 │   ├── netting.js               parsing CSV et moteur de compensation
 │   ├── validation/              artefacts XSLT compilés en SEF
 │   └── vendor/                  runtimes PDF.js et SaxonJS pour le navigateur
@@ -444,6 +448,7 @@ SettleMesh/
 │   ├── standards.test.js        artefacts officiels et Factur-X réel
 │   ├── netting.test.js          invariants de compensation et CSV
 │   ├── storage.test.js          priorité et migration du stockage local
+│   ├── metrics.test.js          agrégation, bornes et confidentialité des métriques
 │   ├── api.test.js              contrat HTTP, confidentialité et limites API
 │   ├── auth.test.js             clés, hashes, rotation et configuration d'organisation
 │   └── fixtures/                documents de test
@@ -465,6 +470,7 @@ Clé `localStorage` : `settlemesh-v1`. Au premier chargement, l'application rech
 profile      configuration de réception de l'entreprise
 history      jusqu'à 100 résultats sans XML brut
 lastResult   dernier résultat affichable
+metrics      compteurs d’activation agrégés, sans contenu ni identifiant de facture
 netting
   obligations  jusqu'à 500 obligations normalisées
   source       nom descriptif du registre chargé
@@ -533,7 +539,7 @@ Limites : corps HTTP de 2 Mo, XML de 1 Mo, protection générale de 120 requête
 
 ### 9.1 Position actuelle
 
-SettleMesh v0.6 fournit un précontrôle technique, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
+SettleMesh v0.7 fournit un précontrôle technique, des métriques pilote agrégées locales, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
 
 ### 9.2 Analyse obligatoire avant un pilote de compensation réelle
 
@@ -620,7 +626,7 @@ Hypothèses de tarification à tester : abonnement premium plus frais fixe par c
 - incidents de confidentialité ;
 - divergence de position nette, dont la cible est strictement zéro.
 
-Le MVP local ne collecte actuellement aucune télémétrie. Toute collecte future doit être consentie, minimisée et documentée.
+Le MVP ne transmet aucune télémétrie. Il conserve uniquement dans le navigateur des compteurs agrégés de profil, partage et validation, sans XML, numéro de facture, fournisseur, montant ni identifiant fiscal. Leur export est volontaire et leur remise à zéro indépendante de l’historique. Toute collecte serveur future doit être consentie, minimisée et documentée.
 
 ## 12. Tests et critères de qualité
 
@@ -635,7 +641,7 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 34 tests
+### 12.2 Couverture actuelle des 38 tests
 
 `test/core.test.js` — 11 tests :
 
@@ -669,6 +675,13 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 
 - récupération et réécriture d'une sauvegarde locale Eurule sous la clé SettleMesh ;
 - priorité de la sauvegarde courante et repli sur une ancienne sauvegarde valide si la nouvelle est illisible.
+
+`test/metrics.test.js` — 4 tests :
+
+- initialisation depuis l’historique existant sans copie d’identifiants ;
+- agrégation des actions, lots, résultats, formats et durées ;
+- export JSON à liste blanche avec garanties de confidentialité explicites ;
+- normalisation et bornage d’une sauvegarde altérée.
 
 `test/api.test.js` — 10 tests :
 
@@ -717,7 +730,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - [ ] Ajouter les contrôles nationaux du premier marché cible.
 - [ ] Vérifier la conformité PDF/A-3 de Factur-X, pas seulement le XML embarqué.
 - [ ] Ajouter VIES et Peppol Directory avec états `vérifié`, `indisponible`, `non vérifié` distincts.
-- [ ] Instrumenter les métriques d'activation sans collecter le contenu des factures.
+- [x] Instrumenter localement les métriques d'activation sans collecter le contenu ni les identifiants des factures ; toute télémétrie serveur reste soumise à consentement et analyse RGPD.
 - [ ] Réaliser revue sécurité, RGPD et modèle de menace.
 - [ ] Obtenir 3 à 5 entreprises pilotes et mesurer les rejets évités.
 
@@ -768,6 +781,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Règles officielles obsolètes | Élevé | Versions affichées, artefacts vendoriés, processus de mise à jour à instaurer |
 | Identités d'entreprises ambiguës | Élevé | Normalisation simple aujourd'hui ; KYB et identifiants légaux demain |
 | CSV incorrect ou malveillant | Moyen | Limites, validation, échappement HTML et neutralisation des formules |
+| Métriques pilote interprétées comme audience globale | Moyen | Libellés « local », export volontaire et distinction explicite entre CheckLink copié et ouverture externe non mesurée |
 | Réapparition de l'ancienne marque Eurule | Faible | SettleMesh est la marque mère depuis v0.4 ; les anciens profils et données locales restent importables uniquement pour compatibilité |
 | Compromission ou mauvaise isolation d'une clé API pilote | Critique | Clés fortes, hashes uniquement, comparaison constante, organisation côté serveur, rotation et quotas en mémoire ; ne pas déployer avant gestionnaire de secrets, révocation, quotas persistants et revue sécurité |
 
@@ -786,6 +800,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-07 | Adopter SettleMesh comme marque mère | Unifier la conformité et la compensation sous une seule promesse | CheckLink et Net deviennent deux modules SettleMesh ; les anciennes données Eurule sont migrées |
 | 2026-10-07 | Versionner l'intégration de validation sous `/api/v1` | Offrir une surface stable aux ERP sans modifier le parcours CheckLink | XML transmis uniquement sur appel API explicite, non persisté, API locale tant que l'infrastructure de production manque |
 | 2026-10-07 | Authentifier l'API pilote par clé hashée rattachée à une organisation | Fermer l'endpoint par défaut et préparer une facturation/quota par client sans stocker de compte utilisateur | Clé brute affichée une fois, organisation dérivée côté serveur, rotation possible ; identité humaine et persistance restent hors périmètre |
+| 2026-10-07 | Mesurer l’activation par agrégats locaux exportables | Donner aux pilotes et investisseurs des preuves d’usage sans transmettre le contenu des factures | Compteurs à liste blanche dans le navigateur ; aucune télémétrie réseau ni mesure des ouvertures externes sans consentement |
 
 ## 16. Questions ouvertes à trancher
 

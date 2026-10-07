@@ -15,6 +15,14 @@ import {
   validateInvoice
 } from "./core.js";
 import { extractFacturXXml } from "./facturx.js";
+import {
+  exportLocalMetrics,
+  normalizeLocalMetrics,
+  recordMetricAction,
+  recordValidationRun,
+  resetLocalMetrics,
+  summarizeLocalMetrics
+} from "./metrics.js";
 import { createNettingDemo, exportNettingCsv, nettingCsvTemplate, parseNettingCsv, simulateNetting } from "./netting.js";
 import { validateEuropeanStandard } from "./standards.js";
 import { readPersistedState, writePersistedState } from "./storage.js";
@@ -38,19 +46,21 @@ function loadState() {
     const profile = { ...clone(DEFAULT_PROFILE), ...(saved?.profile || {}) };
     if (profile.peppolId === "0009:123456789") profile.peppolId = DEFAULT_PROFILE.peppolId;
     if (profile.vatId === "FR40123456789") profile.vatId = DEFAULT_PROFILE.vatId;
+    const history = Array.isArray(saved?.history) ? saved.history.slice(0, 100) : [];
     const loaded = {
       profile,
-      history: Array.isArray(saved?.history) ? saved.history.slice(0, 100) : [],
+      history,
       lastResult: saved?.lastResult || null,
+      metrics: normalizeLocalMetrics(saved?.metrics, { history }),
       netting: {
         obligations: Array.isArray(saved?.netting?.obligations) ? saved.netting.obligations.slice(0, 500) : [],
         source: saved?.netting?.source || ""
       }
     };
-    if (persisted.migrated) writePersistedState(localStorage, loaded);
+    if (persisted.migrated || !saved?.metrics) writePersistedState(localStorage, loaded);
     return loaded;
   } catch {
-    return { profile: clone(DEFAULT_PROFILE), history: [], lastResult: null, netting: { obligations: [], source: "" } };
+    return { profile: clone(DEFAULT_PROFILE), history: [], lastResult: null, metrics: normalizeLocalMetrics(null), netting: { obligations: [], source: "" } };
   }
 }
 
@@ -68,7 +78,7 @@ function formatDate(value) { return new Intl.DateTimeFormat("fr-FR", { dateStyle
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]); }
 
 function persist() {
-  writePersistedState(localStorage, { profile: state.profile, history: state.history, lastResult: state.lastResult, netting: state.netting });
+  writePersistedState(localStorage, { profile: state.profile, history: state.history, lastResult: state.lastResult, metrics: state.metrics, netting: state.netting });
 }
 
 function toast(title, detail = "") {
@@ -102,6 +112,9 @@ async function copyCheckLink() {
   catch {
     const input = document.createElement("textarea"); input.value = link; document.body.append(input); input.select(); document.execCommand("copy"); input.remove();
   }
+  state.metrics = recordMetricAction(state.metrics, "checklink-copy");
+  persist();
+  renderDashboard();
   toast("CheckLink copié", "Vous pouvez maintenant l’envoyer à un fournisseur.");
 }
 
@@ -190,6 +203,14 @@ function renderDashboard() {
   $("#side-link").textContent = linkFor(profile);
   $("#completion-value").textContent = `${completeness}%`;
   $("#completion-ring").style.setProperty("--value", completeness);
+
+  const pilot = summarizeLocalMetrics(state.metrics);
+  $("#pilot-link-copies").textContent = pilot.checkLinkCopies;
+  $("#pilot-files").textContent = pilot.validationAttempts;
+  $("#pilot-readable-rate").textContent = pilot.readableRate == null ? "—" : `${pilot.readableRate}%`;
+  $("#pilot-ready-rate").textContent = pilot.readyRate == null ? "—" : `${pilot.readyRate}%`;
+  $("#pilot-average-time").textContent = pilot.averageDurationMs == null ? "—" : pilot.averageDurationMs < 1000 ? `${pilot.averageDurationMs} ms` : `${(pilot.averageDurationMs / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} s`;
+  $("#pilot-period").textContent = `Depuis le ${new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(new Date(pilot.periodStartedAt))} · ${pilot.profileUpdates} mise${pilot.profileUpdates > 1 ? "s" : ""} à jour du profil`;
 
   const readiness = [
     [Boolean(profile.legalName && profile.vatId), "Identité légale", profile.legalName || "À compléter"],
@@ -357,14 +378,19 @@ function saveResults(results) {
 }
 
 async function analyze(xmlText, source = {}) {
+  const startedAt = performance.now();
   try {
     setValidationProgress(true, "Lecture de la facture…");
     const result = await buildValidationResult(xmlText, source);
+    state.metrics = recordValidationRun(state.metrics, { submitted: 1, results: [result], durationMs: performance.now() - startedAt });
     saveResults([result]);
     $("#batch-panel").hidden = true;
     renderResult(result);
     toast("Contrôle terminé", resultSummary(result).headline);
   } catch (error) {
+    state.metrics = recordValidationRun(state.metrics, { submitted: 1, results: [], durationMs: performance.now() - startedAt });
+    persist();
+    renderDashboard();
     toast("Fichier non analysé", error.message || "Le document ne peut pas être lu.");
   } finally {
     setValidationProgress(false);
@@ -387,6 +413,7 @@ async function analyzeFiles(fileList) {
   const selected = [...(fileList || [])];
   if (!selected.length) return;
   const files = selected.slice(0, 20);
+  const startedAt = performance.now();
   if (selected.length > files.length) toast("Lot limité à 20 fichiers", `${selected.length - files.length} fichier(s) n’ont pas été traités.`);
   const entries = [];
   setValidationProgress(true, `Préparation de ${files.length} fichier${files.length > 1 ? "s" : ""}…`);
@@ -404,6 +431,9 @@ async function analyzeFiles(fileList) {
       }
     }
     const results = entries.flatMap((entry) => entry.result ? [entry.result] : []);
+    state.metrics = recordValidationRun(state.metrics, { submitted: files.length, results, durationMs: performance.now() - startedAt, batch: files.length > 1 });
+    persist();
+    renderDashboard();
     saveResults(results);
     if (files.length === 1) {
       if (results.length === 1) {
@@ -452,6 +482,7 @@ function setupEvents() {
     event.preventDefault();
     const profile = profileFromForm(event.currentTarget);
     if (!profile.acceptedFormats.length) return toast("Choisissez un format", "Sélectionnez au moins UBL, CII ou Factur-X.");
+    state.metrics = recordMetricAction(state.metrics, "profile-update");
     state.profile = profile; persist(); renderAll(); fillProfileForm();
     $("#save-status").textContent = `Enregistré à ${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
     toast("CheckLink actualisé", "Les nouvelles exigences sont intégrées au lien.");
@@ -469,6 +500,7 @@ function setupEvents() {
     if (file.size > 100 * 1024) return toast("Profil non importé", "Le fichier dépasse la limite de 100 Ko.");
     try {
       state.profile = parseProfileBundle(await file.text());
+      state.metrics = recordMetricAction(state.metrics, "profile-update");
       persist(); renderAll(); fillProfileForm();
       toast("Profil importé", `Le CheckLink de ${state.profile.companyName} est prêt.`);
     } catch (error) {
@@ -495,6 +527,16 @@ function setupEvents() {
   $("#export-history").addEventListener("click", () => {
     if (!state.history.length) return toast("Historique vide", "Effectuez au moins un contrôle avant l’export.");
     download(`settlemesh-historique-${new Date().toISOString().slice(0, 10)}.csv`, exportHistoryCsv(state.history), "text/csv;charset=utf-8");
+  });
+  $("#export-pilot-metrics").addEventListener("click", () => {
+    download(`settlemesh-metriques-${new Date().toISOString().slice(0, 10)}.json`, exportLocalMetrics(state.metrics), "application/json;charset=utf-8");
+    toast("Métriques exportées", "Le fichier contient uniquement des agrégats locaux, sans contenu de facture.");
+  });
+  $("#reset-pilot-metrics").addEventListener("click", () => {
+    if (!window.confirm("Remettre à zéro les métriques agrégées de ce navigateur ? L’historique des contrôles sera conservé.")) return;
+    state.metrics = resetLocalMetrics();
+    persist(); renderDashboard();
+    toast("Métriques remises à zéro", "L’historique local des contrôles n’a pas été modifié.");
   });
   $("#history-search").addEventListener("input", (event) => { historyQuery = event.target.value; renderHistory(); });
   $("#history-outcome").addEventListener("change", (event) => { historyOutcome = event.target.value; renderHistory(); });
