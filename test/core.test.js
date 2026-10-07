@@ -1,100 +1,79 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildCycleRecord,
-  computePlan,
-  createDemoInvoices,
-  parseInvoiceCSV,
-  settlementsToCSV,
-  validatePortfolio
+  DEFAULT_PROFILE,
+  createCheckLink,
+  createDemoXml,
+  decodeProfile,
+  encodeProfile,
+  exportResultText,
+  profileCompleteness,
+  profileSlug,
+  resultSummary,
+  validateInvoice
 } from "../dist/core.js";
 
-test("parse un CSV français séparé par des points-virgules", () => {
-  const csv = "référence;fournisseur;client;montant;échéance;statut\nF-1;Alpha;Beta;12 500,50;31/10/2026;ouverte";
-  const result = parseInvoiceCSV(csv);
-  assert.equal(result.errors.length, 0);
-  assert.equal(result.invoices.length, 1);
-  assert.deepEqual(result.invoices[0], {
-    id: "F-1",
-    supplier: "Alpha",
-    customer: "Beta",
-    amount: 12500.5,
-    dueDate: "2026-10-31",
-    status: "open"
-  });
+test("encode et décode un profil CheckLink", () => {
+  const decoded = decodeProfile(encodeProfile(DEFAULT_PROFILE));
+  assert.equal(decoded.companyName, DEFAULT_PROFILE.companyName);
+  assert.equal(decoded.vatId, DEFAULT_PROFILE.vatId);
+  assert.deepEqual(decoded.acceptedFormats, DEFAULT_PROFILE.acceptedFormats);
+  assert.equal(decoded.requirePurchaseOrder, true);
 });
 
-test("signale les colonnes obligatoires manquantes", () => {
-  const result = parseInvoiceCSV("id;montant\nF-1;100");
-  assert.equal(result.invoices.length, 0);
-  assert.match(result.errors[0], /supplier|fournisseur/i);
+test("génère un slug et un lien partageable", () => {
+  assert.equal(profileSlug("École des Arts & Métiers"), "ecole-des-arts-metiers");
+  const link = createCheckLink(DEFAULT_PROFILE, { origin: "https://eurule.test", pathname: "/app" });
+  assert.match(link, /^https:\/\/eurule\.test\/app#check\/atelier-nova\//);
+  assert.ok(decodeProfile(link.split("/").at(-1)));
 });
 
-test("compense un cycle à trois entreprises", () => {
-  const plan = computePlan([
-    { id: "1", supplier: "B", customer: "A", amount: 100, status: "open" },
-    { id: "2", supplier: "C", customer: "B", amount: 80, status: "open" },
-    { id: "3", supplier: "A", customer: "C", amount: 70, status: "overdue" }
-  ]);
-  assert.equal(plan.gross, 250);
-  assert.equal(plan.netCash, 30);
-  assert.equal(plan.totalCleared, 220);
-  assert.equal(plan.reductionRate, 0.88);
-  assert.equal(plan.settlements.reduce((sum, item) => sum + item.amount, 0), 30);
+test("calcule la complétude du profil", () => {
+  assert.equal(profileCompleteness(DEFAULT_PROFILE), 100);
+  assert.ok(profileCompleteness({ ...DEFAULT_PROFILE, vatId: "", instructions: "" }) < 100);
 });
 
-test("effectue d’abord la compensation bilatérale", () => {
-  const plan = computePlan([
-    { id: "1", supplier: "B", customer: "A", amount: 100, status: "open" },
-    { id: "2", supplier: "A", customer: "B", amount: 65, status: "open" }
-  ]);
-  assert.equal(plan.gross, 165);
-  assert.equal(plan.bilateralCleared, 130);
-  assert.equal(plan.bilateralRemaining, 35);
-  assert.deepEqual(plan.settlements, [{ from: "A", to: "B", amount: 35 }]);
+test("bloque une facture visant la mauvaise entité", () => {
+  const result = validateInvoice({
+    syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-1", issueDate: "2026-10-07", currency: "EUR",
+    supplierName: "Studio Horizon SAS", supplierVat: "FR123", buyerName: "Autre société", buyerVat: "FR999",
+    buyerEndpoint: "0009:999", purchaseOrder: "", buyerReference: "", taxExclusive: 100,
+    taxAmount: 20, taxInclusive: 120, payableAmount: 120, lineCount: 1
+  }, DEFAULT_PROFILE);
+  assert.equal(result.outcome, "blocked");
+  assert.ok(result.counts.error >= 3);
+  assert.ok(result.checks.some((item) => item.id === "buyer" && item.status === "error"));
 });
 
-test("exclut les factures payées et litigieuses", () => {
-  const plan = computePlan([
-    { id: "1", supplier: "B", customer: "A", amount: 100, status: "paid" },
-    { id: "2", supplier: "C", customer: "A", amount: 50, status: "disputed" },
-    { id: "3", supplier: "D", customer: "A", amount: 25, status: "open" }
-  ]);
-  assert.equal(plan.gross, 25);
-  assert.equal(plan.eligibleCount, 1);
-  assert.equal(plan.excludedCount, 2);
+test("accepte une facture correspondant au profil", () => {
+  const result = validateInvoice({
+    syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-2", issueDate: "2026-10-07", currency: "EUR",
+    supplierName: "Studio Horizon SAS", supplierVat: "FR123", buyerName: DEFAULT_PROFILE.legalName,
+    buyerVat: DEFAULT_PROFILE.vatId, buyerEndpoint: DEFAULT_PROFILE.peppolId, purchaseOrder: "PO-42",
+    buyerReference: "", taxExclusive: 100, taxAmount: 20, taxInclusive: 120, payableAmount: 120, lineCount: 1
+  }, DEFAULT_PROFILE);
+  assert.equal(result.outcome, "ready");
+  assert.equal(result.counts.error, 0);
+  assert.equal(resultSummary(result).label, "Prête à envoyer");
 });
 
-test("conserve l’équilibre comptable du portefeuille de démonstration", () => {
-  const plan = computePlan(createDemoInvoices());
-  const netSum = plan.entities.reduce((sum, entity) => sum + entity.net, 0);
-  const paid = plan.settlements.reduce((sum, item) => sum + item.amount, 0);
-  assert.equal(netSum, 0);
-  assert.equal(paid, plan.netCash);
-  assert.ok(plan.reductionRate > 0.5);
+test("produit un rapport lisible", () => {
+  const result = validateInvoice({
+    syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-3", issueDate: "2026-10-07", currency: "EUR",
+    supplierName: "Studio", supplierVat: "FR123", buyerName: DEFAULT_PROFILE.legalName,
+    buyerVat: DEFAULT_PROFILE.vatId, buyerEndpoint: DEFAULT_PROFILE.peppolId, purchaseOrder: "PO-1",
+    taxExclusive: 10, taxAmount: 2, taxInclusive: 12, payableAmount: 12, lineCount: 1
+  }, DEFAULT_PROFILE);
+  const text = exportResultText(result);
+  assert.match(text, /EURULE CHECKLINK/);
+  assert.match(text, /INV-3/);
+  assert.match(text, /Score/);
 });
 
-test("exporte un plan compatible avec un tableur français", () => {
-  const csv = settlementsToCSV([{ from: "A; France", to: "B", amount: 1234.5 }]);
-  assert.match(csv, /"A; France";B;1234,50/);
-  assert.ok(csv.startsWith("\uFEFF"));
-});
-
-test("produit une empreinte de cycle déterministe", () => {
-  const invoices = createDemoInvoices();
-  const approvals = Object.fromEntries(computePlan(invoices).entities.map((entity) => [entity.name, true]));
-  const first = buildCycleRecord({ invoices, approvals, createdAt: "2026-10-07T12:00:00.000Z", status: "sealed" });
-  const second = buildCycleRecord({ invoices, approvals, createdAt: "2026-10-07T12:00:00.000Z", status: "sealed" });
-  assert.equal(first.fingerprint, second.fingerprint);
-  assert.equal(first.id, second.id);
-  assert.ok(first.participants.every((participant) => participant.approved));
-});
-
-test("détecte les références dupliquées avant scellement", () => {
-  const invoices = createDemoInvoices();
-  invoices.push({ ...invoices[0] });
-  const validation = validatePortfolio(invoices);
-  assert.equal(validation.ready, false);
-  assert.equal(validation.stats.duplicateIds, 1);
-  assert.match(validation.issues.join(" "), /doublon/i);
+test("les exemples UBL reflètent les exigences du profil", () => {
+  const invalid = createDemoXml({ valid: false, profile: DEFAULT_PROFILE });
+  const valid = createDemoXml({ valid: true, profile: DEFAULT_PROFILE });
+  assert.doesNotMatch(invalid, /PO-2026-042/);
+  assert.match(valid, /PO-2026-042/);
+  assert.match(valid, new RegExp(DEFAULT_PROFILE.vatId));
 });

@@ -1,19 +1,18 @@
-# SettleMesh
+# Eurule CheckLink
 
-MVP fonctionnel de préparation de cycles de compensation de factures B2B. L’application importe des factures, contrôle leur qualité, calcule les positions nettes d’un réseau d’entreprises et produit un dossier auditable à transmettre à des partenaires agréés.
+MVP de prévalidation des factures électroniques européennes. Une entreprise configure son profil de réception et partage un CheckLink avec ses fournisseurs. Ceux-ci contrôlent leur facture UBL ou CII avant transmission et reçoivent des corrections formulées en langage simple.
 
 ## Fonctionnalités
 
-- import CSV avec séparateur virgule ou point-virgule ;
-- compensation bilatérale puis multilatérale en centimes ;
-- visualisation du réseau avant et après compensation ;
-- portefeuille filtrable et ajout manuel de factures ;
-- approbation simulée des participants ;
-- scellement et archivage local des cycles avec empreinte déterministe ;
-- journal d’audit horodaté ;
-- export CSV des factures et instructions résiduelles ;
-- export JSON d’un dossier complet de cycle ;
-- stockage exclusivement local dans le navigateur.
+- configuration de l’entité destinataire, de son numéro de TVA et de son identifiant Peppol ;
+- sélection des formats, devises et références obligatoires ;
+- génération d’un CheckLink autonome et partageable ;
+- lecture locale des factures XML UBL et CII ;
+- contrôles du destinataire, de la TVA, de l’adresse électronique, du numéro de commande et des totaux ;
+- diagnostic détaillé avec références EN 16931 `BT-*` ;
+- rapport téléchargeable et historique local ;
+- interface fournisseur utilisable sans compte ;
+- aucune transmission ou conservation serveur des factures dans ce MVP.
 
 ## Utilisation locale
 
@@ -25,10 +24,13 @@ npm run serve
 
 Puis ouvrir `http://127.0.0.1:4173`.
 
-## Format CSV
+## Démonstration
 
-Les colonnes obligatoires sont `fournisseur`, `client` et `montant`. Les colonnes `référence`, `échéance` et `statut` sont facultatives. Les statuts reconnus sont `ouverte`, `en retard`, `payée` et `litige`, ainsi que leurs équivalents anglais.
+Dans **Tester une facture**, utiliser :
 
-## Limites
+- **Exemple avec erreurs** pour observer la mauvaise entité, la TVA incorrecte, l’adresse de réception différente et l’absence de commande ;
+- **Exemple conforme** pour obtenir un résultat prêt à envoyer.
 
-Ce MVP produit un dossier de préparation : il ne réalise ni novation, ni cession de créance, ni initiation ou mouvement de fonds. Les validations sont simulées et n’ont pas valeur de signature électronique. Un pilote réel nécessitera des accords contractuels, une analyse réglementaire, une authentification des entreprises et des intégrations avec une plateforme de facturation agréée et un prestataire de paiement agréé.
+## Périmètre
+
+Les contrôles sont une aide à la préparation et ne constituent ni une certification juridique ni une garantie d’acceptation. La validation complète contre les artefacts officiels EN 16931, VIES, OpenPeppol et les annuaires nationaux devra être activée par des connecteurs serveur lors d’un pilote réel.
