@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.5.0` |
-| État | MVP fonctionnel avec interface statique et API locale versionnée ; pas encore un service multi-entreprises en production |
+| Version du code | `0.6.0` |
+| État | MVP fonctionnel avec interface statique et API locale authentifiée par organisation ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 7 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Site statique dont la racine de publication est `dist/` ; l'API Node n'est pas déployée par cet hébergement |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 28 tests au 7 octobre 2026 |
+| Tests automatisés | 34 tests au 7 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -140,7 +140,7 @@ Légende :
 | Lots | Jusqu'à 20 fichiers, 20 Mo chacun | Opérationnel | Traitement séquentiel dans le navigateur |
 | Rapports | TXT, JSON et CSV | Opérationnel | Pas de signature ni piste d'audit serveur |
 | Historique | Recherche, filtre et suppression locale | Opérationnel | 100 résultats maximum dans le navigateur |
-| Intégration | API de validation `/api/v1` | Partiel | Contrat et endpoint local opérationnels ; authentification et déploiement de production absents |
+| Intégration | API de validation `/api/v1` | Partiel | Endpoint local authentifié par clé d'organisation ; secrets, quotas et audit persistants ainsi que déploiement de production absents |
 | Netting | Import CSV d'obligations | Opérationnel | 2 Mo et 500 obligations conservées localement |
 | Netting | Compensation bilatérale | Opérationnel | Simulation seulement, accord requis |
 | Netting | Cycles triangulaires | Opérationnel | Cycles de trois uniquement |
@@ -148,7 +148,8 @@ Légende :
 | Netting | Exclusion litige / cession / statut | Opérationnel | Déclarations fournies par l'importeur, non vérifiées extérieurement |
 | Netting | Positions nettes et paiements résiduels | Opérationnel | Aucun ordre de paiement n'est émis |
 | Netting | Export des propositions et allocations | Opérationnel | Document de travail, pas un accord signé |
-| Identité | Comptes, organisations, rôles | Prévu | Nécessite backend et authentification |
+| Identité | Clés API d'organisation | Partiel | Hashes et quotas en mémoire ; aucun compte, session, membre ou rôle utilisateur |
+| Identité | Comptes, organisations multi-utilisateurs, rôles | Prévu | Nécessite stockage d'identité, sessions, invitations et droits persistants |
 | Réseau | Invitations et contreparties vérifiées | Prévu | Condition du vrai effet réseau |
 | Connecteurs | VIES, Peppol Directory, PDP/PA, ERP | Prévu | APIs, quotas, disponibilité et conformité à cadrer |
 | Workflow | Acceptation multilatérale de la compensation | Prévu | Signature, horodatage et règles juridiques |
@@ -435,6 +436,7 @@ SettleMesh/
 │   └── vendor/                  runtimes PDF.js et SaxonJS pour le navigateur
 ├── scripts/
 │   ├── serve.mjs                lancement de l'application et de l'API locale, port 4173
+│   ├── create-api-key.mjs       génération locale d'une clé et de son hash de configuration
 │   └── build-validation-assets.mjs
 │                                compilation/copie des moteurs normatifs
 ├── test/
@@ -443,8 +445,10 @@ SettleMesh/
 │   ├── netting.test.js          invariants de compensation et CSV
 │   ├── storage.test.js          priorité et migration du stockage local
 │   ├── api.test.js              contrat HTTP, confidentialité et limites API
+│   ├── auth.test.js             clés, hashes, rotation et configuration d'organisation
 │   └── fixtures/                documents de test
 ├── server/
+│   ├── auth.mjs                 génération, configuration et authentification des clés API
 │   ├── server.mjs               HTTP, routage, limites et fichiers statiques
 │   └── validation.mjs           validation serveur EN 16931 / Peppol
 ├── docs/
@@ -482,9 +486,9 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 
 ### 7.4 API de validation v1
 
-Le serveur local expose `GET /api/v1/health` et `POST /api/v1/validate`. La validation reçoit un JSON contenant le XML, un profil optionnel et un nom de source. Elle exécute les contrôles produit, EN 16931 et, si applicable, Peppol. La réponse ne contient pas le XML brut et porte `stored: false`.
+Le serveur local expose `GET /api/v1/health` et `POST /api/v1/validate`. La validation reçoit un JSON contenant le XML, un profil optionnel et un nom de source. Elle exige une clé Bearer dont seul le hash SHA-256 est configuré côté serveur, détermine l'organisation depuis cette clé, puis exécute les contrôles produit, EN 16931 et, si applicable, Peppol. La réponse ne contient pas le XML brut et porte `stored: false`.
 
-Limites : corps HTTP de 2 Mo, XML de 1 Mo et 60 requêtes par minute et par adresse IP. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Elle n'ouvre pas CORS, ne possède pas encore d'authentification et n'est pas déployée avec le site statique. Le contrat de référence est `docs/openapi.yaml`.
+Limites : corps HTTP de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé elle reste fermée. Elle n'ouvre pas CORS et n'est pas déployée avec le site statique. Les secrets, révocations et quotas ne sont pas encore persistants. Le contrat de référence est `docs/openapi.yaml`.
 
 ## 8. Invariants à ne jamais casser
 
@@ -498,9 +502,11 @@ Limites : corps HTTP de 2 Mo, XML de 1 Mo et 60 requêtes par minute et par adre
 
 ### 8.2 Invariants confidentialité
 
-- Le MVP ne transmet pas le contenu des factures à un backend SettleMesh.
+- L'interface navigateur ne transmet pas le contenu des factures à un backend SettleMesh ; seul un client intégrateur appelle explicitement l'API locale.
 - Le XML brut ne doit pas entrer dans l'historique persistant.
 - L'API ne doit ni persister, ni renvoyer, ni journaliser le XML brut.
+- Une clé API brute ne doit jamais être enregistrée dans le dépôt, le CheckLink, les logs ou une réponse ; seul son hash peut être configuré côté serveur.
+- L'organisation d'une requête API doit être déterminée par le serveur depuis la clé authentifiée, jamais acceptée depuis le corps client.
 - Les exports CSV doivent neutraliser les cellules commençant par `=`, `+`, `-` ou `@`.
 - Les nouvelles limites de taille doivent être explicites côté interface et code.
 - Aucune donnée sensible ne doit être ajoutée au fragment du CheckLink.
@@ -527,7 +533,7 @@ Limites : corps HTTP de 2 Mo, XML de 1 Mo et 60 requêtes par minute et par adre
 
 ### 9.1 Position actuelle
 
-SettleMesh v0.5 fournit un précontrôle technique, une API locale d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
+SettleMesh v0.6 fournit un précontrôle technique, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
 
 ### 9.2 Analyse obligatoire avant un pilote de compensation réelle
 
@@ -629,7 +635,7 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 28 tests
+### 12.2 Couverture actuelle des 34 tests
 
 `test/core.test.js` — 11 tests :
 
@@ -664,7 +670,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - récupération et réécriture d'une sauvegarde locale Eurule sous la clé SettleMesh ;
 - priorité de la sauvegarde courante et repli sur une ancienne sauvegarde valide si la nouvelle est illisible.
 
-`test/api.test.js` — 7 tests :
+`test/api.test.js` — 10 tests :
 
 - santé, version et absence de persistance ;
 - validation complète d'un UBL sans restitution du XML ;
@@ -672,7 +678,16 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - rejet des déclarations `DOCTYPE` ;
 - refus des méthodes et types de média non prévus ;
 - limitation de débit explicite ;
+- refus d'une clé absente ou invalide ;
+- fermeture de l'API quand aucune clé n'est configurée ;
+- isolation du quota par organisation ;
 - rejet des requêtes dépassant la taille maximale.
+
+`test/auth.test.js` — 3 tests :
+
+- génération d'une clé forte et conservation du hash uniquement ;
+- rotation de plusieurs clés pour une même organisation ;
+- rejet des configurations faibles, en clair ou dupliquées.
 
 ### 12.3 Tests manuels de référence
 
@@ -695,9 +710,10 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 ### P0 — rendre le pilote crédible
 
 - [x] Adopter SettleMesh comme marque mère, SettleMesh CheckLink comme module de conformité et SettleMesh Net comme module de compensation, avec migration rétrocompatible des données Eurule.
-- [ ] Ajouter une vraie authentification et des organisations multi-utilisateurs.
+- [ ] Ajouter comptes, sessions et organisations multi-utilisateurs avec membres et rôles ; l'API possède déjà une authentification technique par clé d'organisation.
 - [ ] Stocker profils et journaux côté serveur avec chiffrement, rétention et droits d'accès.
-- [x] Créer une API de validation versionnée avec contrat OpenAPI, validation serveur et absence de persistance ; authentification et déploiement restent liés aux points précédents.
+- [x] Créer une API de validation versionnée avec contrat OpenAPI, validation serveur et absence de persistance ; le déploiement reste lié à la gestion persistante des secrets, quotas et audits.
+- [x] Protéger l'API pilote avec clés Bearer hashées, organisation déterminée côté serveur, rotation et quotas en mémoire ; secrets et quotas persistants restent requis avant production.
 - [ ] Ajouter les contrôles nationaux du premier marché cible.
 - [ ] Vérifier la conformité PDF/A-3 de Factur-X, pas seulement le XML embarqué.
 - [ ] Ajouter VIES et Peppol Directory avec états `vérifié`, `indisponible`, `non vérifié` distincts.
@@ -753,7 +769,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Identités d'entreprises ambiguës | Élevé | Normalisation simple aujourd'hui ; KYB et identifiants légaux demain |
 | CSV incorrect ou malveillant | Moyen | Limites, validation, échappement HTML et neutralisation des formules |
 | Réapparition de l'ancienne marque Eurule | Faible | SettleMesh est la marque mère depuis v0.4 ; les anciens profils et données locales restent importables uniquement pour compatibilité |
-| API pilote exposée sans authentification | Critique | Écoute locale par défaut, pas de CORS, limites strictes et avertissement explicite ; ne pas déployer avant identité, quotas persistants et revue sécurité |
+| Compromission ou mauvaise isolation d'une clé API pilote | Critique | Clés fortes, hashes uniquement, comparaison constante, organisation côté serveur, rotation et quotas en mémoire ; ne pas déployer avant gestionnaire de secrets, révocation, quotas persistants et revue sécurité |
 
 ## 15. Journal des décisions
 
@@ -768,7 +784,8 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-07 | Exiger l'accord des parties | Une optimisation mathématique n'éteint pas seule une créance | Futur workflow de consentement et de preuve |
 | 2026-10-07 | Faire de ce fichier la source de vérité | Éviter les dérives de périmètre et décisions perdues | Mise à jour obligatoire lors de changements matériels |
 | 2026-10-07 | Adopter SettleMesh comme marque mère | Unifier la conformité et la compensation sous une seule promesse | CheckLink et Net deviennent deux modules SettleMesh ; les anciennes données Eurule sont migrées |
-| 2026-10-07 | Versionner l'intégration de validation sous `/api/v1` | Offrir une surface stable aux ERP sans modifier le parcours CheckLink | XML transmis uniquement sur appel API explicite, non persisté, API locale tant que l'authentification manque |
+| 2026-10-07 | Versionner l'intégration de validation sous `/api/v1` | Offrir une surface stable aux ERP sans modifier le parcours CheckLink | XML transmis uniquement sur appel API explicite, non persisté, API locale tant que l'infrastructure de production manque |
+| 2026-10-07 | Authentifier l'API pilote par clé hashée rattachée à une organisation | Fermer l'endpoint par défaut et préparer une facturation/quota par client sans stocker de compte utilisateur | Clé brute affichée une fois, organisation dérivée côté serveur, rotation possible ; identité humaine et persistance restent hors périmètre |
 
 ## 16. Questions ouvertes à trancher
 

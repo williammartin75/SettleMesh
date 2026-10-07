@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { authenticateApiKey, parseApiKeyConfiguration } from "./auth.mjs";
 import { validateApiInvoice } from "./validation.mjs";
 
 export const API_VERSION = "v1";
@@ -47,10 +48,15 @@ async function readJson(request) {
   }
 }
 
-const createRateLimiter = (limit, windowMs) => {
+const createRateLimiter = (windowMs) => {
   const clients = new Map();
-  return (key) => {
+  return (key, limit) => {
     const now = Date.now();
+    if (clients.size > 10_000) {
+      for (const [clientKey, entry] of clients) {
+        if (entry.resetAt <= now) clients.delete(clientKey);
+      }
+    }
     const current = clients.get(key);
     if (!current || current.resetAt <= now) {
       clients.set(key, { count: 1, resetAt: now + windowMs });
@@ -61,50 +67,76 @@ const createRateLimiter = (limit, windowMs) => {
   };
 };
 
-export function createSettleMeshServer({ root = defaultRoot, logger = console, rateLimit = 60 } = {}) {
+const rateHeaders = (rate, limit, scope) => ({
+  "X-RateLimit-Limit": String(limit),
+  "X-RateLimit-Remaining": String(rate.remaining),
+  "X-RateLimit-Reset": String(Math.ceil(rate.resetAt / 1000)),
+  "X-RateLimit-Scope": scope
+});
+
+export function createSettleMeshServer({
+  root = defaultRoot,
+  logger = console,
+  rateLimit = 120,
+  apiKeys = parseApiKeyConfiguration()
+} = {}) {
   const normalizedRoot = resolve(root);
-  const consumeRate = createRateLimiter(rateLimit, 60_000);
+  const credentials = parseApiKeyConfiguration(JSON.stringify(apiKeys));
+  const consumeIpRate = createRateLimiter(60_000);
+  const consumeOrganizationRate = createRateLimiter(60_000);
   return createServer(async (request, response) => {
     const requestId = randomUUID();
     const url = new URL(request.url || "/", "http://localhost");
 
     if (url.pathname.startsWith("/api/")) {
-      const rate = consumeRate(request.socket.remoteAddress || "unknown");
-      const rateHeaders = {
-        "X-RateLimit-Limit": String(rateLimit),
-        "X-RateLimit-Remaining": String(rate.remaining),
-        "X-RateLimit-Reset": String(Math.ceil(rate.resetAt / 1000))
-      };
-      if (!rate.allowed) {
+      const ipRate = consumeIpRate(request.socket.remoteAddress || "unknown", rateLimit);
+      const ipRateHeaders = rateHeaders(ipRate, rateLimit, "ip");
+      if (!ipRate.allowed) {
         const error = apiError(requestId, "RATE_LIMITED", "Trop de requêtes. Réessayez dans une minute.", 429);
-        return jsonResponse(response, error.status, error.body, rateHeaders);
+        return jsonResponse(response, error.status, error.body, ipRateHeaders);
       }
 
       if (url.pathname === "/api/v1/health" && request.method === "GET") {
         return jsonResponse(response, 200, {
           schema: "settlemesh-api-health", apiVersion: API_VERSION, status: "ok",
           validators: { en16931: "1.3.16", peppol: "3.0.21" },
-          limits: { requestBytes: MAX_API_BODY_BYTES, xmlBytes: 1024 * 1024 },
+          authentication: { validate: "bearer-api-key", configured: credentials.length > 0 },
+          limits: { requestBytes: MAX_API_BODY_BYTES, xmlBytes: 1024 * 1024, ipRequestsPerMinute: rateLimit },
           persistence: false
-        }, rateHeaders);
+        }, ipRateHeaders);
       }
 
       if (url.pathname === "/api/v1/validate") {
         if (request.method !== "POST") {
           const error = apiError(requestId, "METHOD_NOT_ALLOWED", "Utilisez POST pour valider une facture.", 405);
-          return jsonResponse(response, error.status, error.body, { ...rateHeaders, Allow: "POST" });
+          return jsonResponse(response, error.status, error.body, { ...ipRateHeaders, Allow: "POST" });
         }
         if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
           const error = apiError(requestId, "UNSUPPORTED_MEDIA_TYPE", "Utilisez Content-Type: application/json.", 415);
-          return jsonResponse(response, error.status, error.body, rateHeaders);
+          return jsonResponse(response, error.status, error.body, ipRateHeaders);
+        }
+
+        const authentication = authenticateApiKey(request.headers.authorization, credentials);
+        if (!authentication.ok) {
+          const error = apiError(requestId, authentication.code, authentication.message, authentication.statusCode);
+          const challenge = authentication.statusCode === 401 ? { "WWW-Authenticate": 'Bearer realm="SettleMesh API"' } : {};
+          return jsonResponse(response, error.status, error.body, { ...ipRateHeaders, ...challenge });
+        }
+
+        const { organizationId, requestsPerMinute } = authentication.credential;
+        const organizationRate = consumeOrganizationRate(organizationId, requestsPerMinute);
+        const organizationRateHeaders = rateHeaders(organizationRate, requestsPerMinute, "organization");
+        if (!organizationRate.allowed) {
+          const error = apiError(requestId, "RATE_LIMITED", "Quota de l’organisation atteint. Réessayez dans une minute.", 429);
+          return jsonResponse(response, error.status, error.body, organizationRateHeaders);
         }
         try {
           const payload = await readJson(request);
           const result = await validateApiInvoice(payload);
           return jsonResponse(response, 200, {
             schema: "settlemesh-validation-response", apiVersion: API_VERSION, requestId,
-            processedAt: new Date().toISOString(), stored: false, result
-          }, rateHeaders);
+            processedAt: new Date().toISOString(), organizationId, stored: false, result
+          }, { ...organizationRateHeaders, Vary: "Authorization" });
         } catch (error) {
           const status = error.statusCode || 500;
           const message = status >= 500 ? "La validation a échoué de manière inattendue." : error.message;
@@ -113,12 +145,12 @@ export function createSettleMeshServer({ root = defaultRoot, logger = console, r
             name: error.name || "Error",
             code: error.code || "VALIDATION_FAILED"
           });
-          return jsonResponse(response, failure.status, failure.body, rateHeaders);
+          return jsonResponse(response, failure.status, failure.body, organizationRateHeaders);
         }
       }
 
       const error = apiError(requestId, "NOT_FOUND", "Route API inconnue.", 404);
-      return jsonResponse(response, error.status, error.body, rateHeaders);
+      return jsonResponse(response, error.status, error.body, ipRateHeaders);
     }
 
     if (!['GET', 'HEAD'].includes(request.method || '')) {

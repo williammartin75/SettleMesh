@@ -23,7 +23,7 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - import d’un registre de factures en CSV, exclusion des créances litigieuses ou cédées et séparation stricte par devise ;
 - calcul du volume compensable, des positions nettes et des paiements résiduels ;
 - export CSV des propositions de compensation et des factures mobilisées ;
-- API locale versionnée `/api/v1` pour intégrer la validation UBL/CII dans un ERP ou un logiciel de facturation ;
+- API locale versionnée `/api/v1`, protégée par clé Bearer rattachée à une organisation, pour intégrer la validation UBL/CII dans un ERP ou un logiciel de facturation ;
 - interface fournisseur utilisable sans compte ;
 - aucune transmission serveur depuis l'interface navigateur et aucune persistance dans l'API pilote.
 
@@ -33,12 +33,15 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 npm test
 npm run check
 npm run build:validator
+npm run api:key -- atelier-nova
 npm run serve
 ```
 
 Puis ouvrir `http://127.0.0.1:4173`.
 
-Le serveur local expose également `GET /api/v1/health` et `POST /api/v1/validate`. Le contrat, les exemples et les limites de sécurité sont décrits dans [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Cette API pilote n'est pas incluse dans l'hébergement statique et ne doit pas être exposée sur Internet avant l'ajout d'une authentification.
+La commande `api:key` affiche une clé une seule fois et l'objet de configuration contenant uniquement son hash SHA-256. Placer cet objet dans la variable `SETTLEMESH_API_KEYS` avant de lancer le serveur. Aucun secret ne doit être ajouté au dépôt ou au CheckLink.
+
+Le serveur local expose également `GET /api/v1/health` et `POST /api/v1/validate`. Le contrat, les exemples et les limites de sécurité sont décrits dans [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Cette API pilote n'est pas incluse dans l'hébergement statique. Les clés et quotas sont encore configurés en mémoire : un gestionnaire de secrets, une révocation persistante, TLS et une revue de sécurité restent nécessaires avant une exposition Internet.
 
 ## Démonstration
 

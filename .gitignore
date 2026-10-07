@@ -2,6 +2,9 @@
 Thumbs.db
 *.log
 node_modules/
+.env
+.env.*
+!.env.example
 .sites/
 settlemesh-site.zip
 eurule-site-*.tgz

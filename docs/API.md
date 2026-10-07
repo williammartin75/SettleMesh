@@ -4,14 +4,28 @@ L'API v1 permet à un ERP, un logiciel de facturation ou une Plateforme Agréée
 
 ## Statut
 
-Cette API est un endpoint pilote exécutable localement. Elle est versionnée et testée, mais elle n'est pas encore déployée par l'hébergement statique du projet et ne possède pas encore d'authentification par organisation. Elle ne doit pas être exposée telle quelle sur Internet.
+Cette API est un endpoint pilote exécutable localement. Elle est versionnée, testée et protégée par des clés Bearer rattachées à une organisation. Elle n'est pas déployée par l'hébergement statique du projet. Les clés et quotas étant encore configurés en mémoire, elle ne doit pas être exposée telle quelle sur Internet.
 
 ## Démarrage
 
 ```powershell
 npm install
+npm run api:key -- atelier-nova
+```
+
+La commande affiche deux valeurs :
+
+1. la clé secrète `sm_live_…`, affichée une seule fois et à conserver côté client ;
+2. un objet JSON contenant `organizationId`, `keyId`, le hash SHA-256 et le quota de l'organisation.
+
+Configurer ensuite le serveur avec uniquement l'objet hashé :
+
+```powershell
+$env:SETTLEMESH_API_KEYS = '[{"organizationId":"atelier-nova","keyId":"atelier-nova-20261007","keyHash":"<sha256-hexadecimal>","requestsPerMinute":60}]'
 npm run serve
 ```
+
+Plusieurs objets portant le même `organizationId` permettent une rotation progressive des clés. Les `keyId` et les hashes doivent rester uniques. Si la variable est absente ou vide, l'endpoint de validation reste fermé avec `503 AUTH_NOT_CONFIGURED`.
 
 Le même serveur fournit ensuite :
 
@@ -23,10 +37,11 @@ Le port peut être changé avec la variable d'environnement `PORT`.
 
 ## Requête de validation
 
-En-tête obligatoire :
+En-têtes obligatoires :
 
 ```text
 Content-Type: application/json
+Authorization: Bearer sm_live_…
 ```
 
 Corps :
@@ -78,9 +93,11 @@ $body = @{
   }
 } | ConvertTo-Json -Depth 6
 
+$apiKey = 'sm_live_…'
 Invoke-RestMethod `
   -Method Post `
   -Uri 'http://127.0.0.1:4173/api/v1/validate' `
+  -Headers @{ Authorization = "Bearer $apiKey" } `
   -ContentType 'application/json' `
   -Body $body
 ```
@@ -93,6 +110,7 @@ Invoke-RestMethod `
   "apiVersion": "v1",
   "requestId": "2c51c119-26cf-4eec-a763-827703766faa",
   "processedAt": "2026-10-07T12:00:00.000Z",
+  "organizationId": "atelier-nova",
   "stored": false,
   "result": {
     "id": "CHK-...",
@@ -113,7 +131,7 @@ Invoke-RestMethod `
 }
 ```
 
-Le champ `result.invoice` contient uniquement les données structurées extraites. Le XML brut est retiré avant la réponse. `stored: false` indique que le serveur pilote ne conserve pas la requête ni son résultat.
+`organizationId` provient exclusivement de la clé authentifiée, jamais du corps envoyé par le client. Le champ `result.invoice` contient uniquement les données structurées extraites. Le XML brut est retiré avant la réponse. `stored: false` indique que le serveur pilote ne conserve pas la requête ni son résultat.
 
 ## Résultats métier
 
@@ -142,6 +160,7 @@ Toutes les erreurs suivent ce format :
 | HTTP | Code principal | Signification |
 |---:|---|---|
 | 400 | `INVALID_JSON` | Corps JSON non lisible |
+| 401 | `AUTH_REQUIRED`, `INVALID_API_KEY` | Clé absente ou invalide |
 | 404 | `NOT_FOUND` | Route API inconnue |
 | 405 | `METHOD_NOT_ALLOWED` | Méthode HTTP non prise en charge |
 | 413 | `BODY_TOO_LARGE`, `XML_TOO_LARGE` | Limite de taille dépassée |
@@ -149,21 +168,28 @@ Toutes les erreurs suivent ce format :
 | 422 | `XML_REQUIRED`, `INVALID_XML`, `UNSAFE_XML`, `INVALID_PROFILE` | Données métier invalides ou DOCTYPE refusé |
 | 429 | `RATE_LIMITED` | Limite de débit atteinte |
 | 500 | `VALIDATION_FAILED` | Erreur interne non prévue |
+| 503 | `AUTH_NOT_CONFIGURED` | Aucune clé n'est configurée côté serveur |
 
 ## Limites et sécurité du pilote
 
 - corps HTTP : 2 Mo maximum ;
 - XML : 1 Mo maximum ;
-- 60 appels par minute et par adresse IP en mémoire ;
+- 120 appels par minute et par adresse IP en mémoire, comme protection générale ;
+- quota par organisation, 60 appels par minute par défaut et configurable entre 1 et 10 000 ;
+- toutes les clés d'une même organisation partagent son quota ;
 - XML UBL/CII uniquement ; le PDF Factur-X reste traité dans le navigateur ;
 - déclarations `DOCTYPE` refusées pour éviter toute résolution d'entité non fiable ;
 - aucune persistance ;
 - aucun contenu de facture dans les logs applicatifs ;
+- clé secrète jamais stockée dans la configuration : seul son hash SHA-256 est chargé ;
+- comparaison des hashes en temps constant et réponse générique en cas de clé invalide ;
+- organisation dérivée de la clé côté serveur, sans faire confiance au corps de requête ;
+- fermeture par défaut de la validation si aucune clé n'est configurée ;
 - pas de CORS ouvert par défaut ;
 - en-têtes `nosniff`, `no-referrer` et permissions sensibles désactivées ;
-- aucune authentification, aucun quota par organisation et aucun SLA dans cette version locale.
+- aucun compte utilisateur, rôle, session, journal d'audit persistant ni SLA dans cette version locale.
 
-Avant tout déploiement Internet, il faut au minimum ajouter authentification forte, clés tournantes ou OAuth client credentials, isolation par organisation, quotas persistants, journal d'audit sans contenu sensible, TLS géré, observabilité, politique de rétention et revue de sécurité.
+Avant tout déploiement Internet, il faut au minimum placer les clés dans un gestionnaire de secrets, ajouter révocation et quotas persistants ou OAuth client credentials, TLS géré, journal d'audit sans contenu sensible, observabilité, politique de rétention et revue de sécurité.
 
 ## Versionnement
 
