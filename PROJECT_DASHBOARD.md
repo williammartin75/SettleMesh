@@ -793,4 +793,3 @@ Une fonctionnalité n'est terminée que si :
 8. ce tableau de bord reflète le nouvel état réel ;
 9. le dépôt ne contient pas de changement accidentel ;
 10. le livrable peut être expliqué en une phrase mesurable.
-

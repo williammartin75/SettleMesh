@@ -31,4 +31,3 @@ Après toute modification :
 6. dans le compte rendu, préciser le résultat, les validations effectuées et les limites restantes.
 
 Une tâche ne doit pas être déclarée terminée si le code et le tableau de bord se contredisent.
-
