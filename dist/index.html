@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10231d">
+  <meta name="description" content="SettleMesh transforme un réseau de factures B2B en un plan de règlement net, lisible et auditable.">
+  <title>SettleMesh — Clearing de factures B2B</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2310231d'/%3E%3Cpath d='M16 21h19M29 43h19M16 21l13 22M35 21l13 22' stroke='%2379e6af' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Navigation principale">
+      <a class="brand" href="#overview" data-nav="overview" aria-label="SettleMesh — vue d’ensemble">
+        <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+          <rect width="48" height="48" rx="14"></rect>
+          <path d="M11 15.5h15M22 32.5h15M11 15.5l11 17M26 15.5l11 17"></path>
+        </svg>
+        <span>Settle<span>Mesh</span></span>
+      </a>
+
+      <nav class="nav-list">
+        <button class="nav-item active" data-nav="overview" type="button">
+          <svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v10h-6zM4 14h6v6H4zM14 18h6v2h-6z"/></svg>
+          Vue d’ensemble
+        </button>
+        <button class="nav-item" data-nav="invoices" type="button">
+          <svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM14 3v4h4M9 11h6M9 15h6"/></svg>
+          Factures
+          <span class="nav-count" id="invoice-nav-count">0</span>
+        </button>
+        <button class="nav-item" data-nav="network" type="button">
+          <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="m8.7 10.7 6.6-3.4M8.7 13.3l6.6 3.4"/></svg>
+          Réseau
+        </button>
+        <button class="nav-item" data-nav="settlement" type="button">
+          <svg viewBox="0 0 24 24"><path d="M4 7h14M14 3l4 4-4 4M20 17H6M10 13l-4 4 4 4"/></svg>
+          Cycle de règlement
+          <span class="status-dot" aria-hidden="true"></span>
+        </button>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <div class="local-badge">
+        <span class="local-badge-icon"><span></span></span>
+        <div><strong>Données locales</strong><small>Aucun envoi externe</small></div>
+      </div>
+      <button class="nav-item" data-nav="settings" type="button">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+        Paramètres
+      </button>
+      <div class="sidebar-footer"><span>Prototype opérationnel</span><strong>v0.1</strong></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobile-menu" type="button" aria-label="Ouvrir le menu">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <div class="page-heading">
+          <div class="eyebrow"><span class="pulse"></span> Simulation active</div>
+          <h1 id="page-title">Vue d’ensemble</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="button ghost" id="import-button" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M4 14v6h16v-6"/></svg>
+            <span>Importer CSV</span>
+          </button>
+          <button class="button primary" id="add-button" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Ajouter une facture</span>
+          </button>
+          <input id="file-input" type="file" accept=".csv,text/csv" hidden>
+        </div>
+      </header>
+
+      <section class="view active" data-view="overview">
+        <div class="hero-strip">
+          <div>
+            <span class="hero-kicker">Clearing intelligent · réseau de démonstration</span>
+            <h2>Moins d’argent qui circule.<br><em>Plus de trésorerie disponible.</em></h2>
+          </div>
+          <div class="hero-actions">
+            <button class="button soft" type="button" data-go="settlement">Préparer le cycle</button>
+            <button class="icon-button" type="button" id="refresh-plan" aria-label="Recalculer le plan" title="Recalculer">
+              <svg viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 6.5L4 11M5.5 15A7 7 0 0 0 18 17.5l2-4.5"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="kpi-grid">
+          <article class="kpi-card dark">
+            <span class="kpi-label">Volume brut analysé</span>
+            <strong id="kpi-gross">—</strong>
+            <span class="kpi-meta"><i></i><span id="kpi-invoices">0 facture</span></span>
+          </article>
+          <article class="kpi-card green">
+            <span class="kpi-label">Liquidité libérée</span>
+            <strong id="kpi-cleared">—</strong>
+            <span class="kpi-meta light"><span id="kpi-rate">0 %</span> du volume brut</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Solde à régler</span>
+            <strong id="kpi-net">—</strong>
+            <span class="kpi-meta neutral"><span id="kpi-transfers">0</span> virements proposés</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Entreprises connectées</span>
+            <strong id="kpi-entities">—</strong>
+            <span class="kpi-meta neutral">dans ce cycle</span>
+          </article>
+        </div>
+
+        <div class="dashboard-grid">
+          <article class="card network-card">
+            <div class="card-header">
+              <div><span class="section-label">Aperçu du réseau</span><h3>Obligations avant compensation</h3></div>
+              <div class="segmented" role="group" aria-label="Type de graphe">
+                <button class="active" type="button" data-graph-mode="obligations">Brut</button>
+                <button type="button" data-graph-mode="settlements">Net</button>
+              </div>
+            </div>
+            <div class="graph-wrap graph-overview" id="overview-graph" aria-label="Visualisation du réseau de factures"></div>
+            <div class="graph-caption">
+              <span><i class="legend-line gross"></i> Obligation agrégée</span>
+              <span><i class="legend-dot creditor"></i> Créditeur net</span>
+              <span><i class="legend-dot debtor"></i> Débiteur net</span>
+              <button type="button" data-go="network">Explorer le réseau <span>→</span></button>
+            </div>
+          </article>
+
+          <article class="card impact-card">
+            <div class="card-header compact"><div><span class="section-label">Impact estimé</span><h3>Réduction de liquidité</h3></div></div>
+            <div class="impact-visual">
+              <div class="radial" id="reduction-radial"><div><strong id="radial-rate">0%</strong><span>compensé</span></div></div>
+            </div>
+            <div class="impact-rows">
+              <div><span>Compensation bilatérale</span><strong id="bilateral-cleared">—</strong></div>
+              <div><span>Compensation multilatérale</span><strong id="multilateral-cleared">—</strong></div>
+              <div class="total"><span>Liquidité totale libérée</span><strong id="impact-total">—</strong></div>
+            </div>
+            <p class="fine-print">Estimation de simulation. L’exécution réelle nécessite l’accord des parties et un partenaire de paiement agréé.</p>
+          </article>
+        </div>
+
+        <div class="dashboard-grid lower">
+          <article class="card">
+            <div class="card-header">
+              <div><span class="section-label">À surveiller</span><h3>Signaux de trésorerie</h3></div>
+              <button class="text-button" type="button" data-go="invoices">Voir les factures</button>
+            </div>
+            <div class="signal-list" id="signal-list"></div>
+          </article>
+          <article class="card">
+            <div class="card-header">
+              <div><span class="section-label">Règlement proposé</span><h3>Premiers mouvements nets</h3></div>
+              <button class="text-button" type="button" data-go="settlement">Tout afficher</button>
+            </div>
+            <div class="mini-settlements" id="mini-settlements"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" data-view="invoices">
+        <div class="section-intro">
+          <div><span class="section-label">Portefeuille</span><h2>Factures du cycle</h2><p>Les factures réglées ou en litige sont conservées, mais exclues du calcul.</p></div>
+          <div class="intro-stat"><span>Éligibles au clearing</span><strong id="eligible-count">0</strong></div>
+        </div>
+
+        <div class="card table-card">
+          <div class="table-toolbar">
+            <label class="search-field">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+              <input id="invoice-search" type="search" placeholder="Rechercher une facture ou une entreprise…">
+            </label>
+            <div class="filter-chips" id="status-filters">
+              <button class="active" type="button" data-status="all">Toutes</button>
+              <button type="button" data-status="open">Ouvertes</button>
+              <button type="button" data-status="overdue">En retard</button>
+              <button type="button" data-status="excluded">Exclues</button>
+            </div>
+            <button class="button ghost compact-button" id="download-template" type="button">Modèle CSV</button>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Référence</th><th>Fournisseur</th><th>Client débiteur</th><th>Échéance</th><th>Statut</th><th class="align-right">Montant</th><th></th></tr></thead>
+              <tbody id="invoice-table-body"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="invoice-empty" hidden>
+            <div class="empty-icon">↗</div><h3>Aucune facture trouvée</h3><p>Modifiez les filtres ou importez un fichier CSV.</p>
+          </div>
+          <div class="table-footer"><span id="table-result-count">0 résultat</span><span>Montants exprimés en EUR</span></div>
+        </div>
+
+        <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="Importer un fichier CSV par glisser-déposer">
+          <svg viewBox="0 0 24 24"><path d="M12 16V4M8 8l4-4 4 4M5 14v5h14v-5"/></svg>
+          <div><strong>Déposez un export CSV ici</strong><span>Colonnes : référence, fournisseur, client, montant, échéance, statut</span></div>
+          <button class="button soft" type="button">Choisir un fichier</button>
+        </div>
+      </section>
+
+      <section class="view" data-view="network">
+        <div class="section-intro">
+          <div><span class="section-label">Cartographie</span><h2>Réseau d’obligations</h2><p>Visualisez les dépendances avant et après compensation multilatérale.</p></div>
+          <div class="segmented large" role="group" aria-label="Type de graphe détaillé">
+            <button class="active" type="button" data-network-mode="obligations">Avant</button>
+            <button type="button" data-network-mode="settlements">Après</button>
+          </div>
+        </div>
+        <div class="network-layout">
+          <article class="card graph-detail-card">
+            <div class="graph-toolbar">
+              <div><span class="live-dot"></span><span id="graph-edge-count">0 obligations</span></div>
+              <div class="graph-help">Survolez une entreprise ou un flux pour l’isoler.</div>
+            </div>
+            <div class="graph-wrap graph-detail" id="detail-graph"></div>
+          </article>
+          <aside class="card entity-panel">
+            <div class="card-header compact"><div><span class="section-label">Positions nettes</span><h3>Participants</h3></div></div>
+            <div class="entity-list" id="entity-list"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" data-view="settlement">
+        <div class="section-intro">
+          <div><span class="section-label">Cycle simulé</span><h2>Plan de règlement net</h2><p>Un plan déterministe calculé à partir des positions de chaque participant.</p></div>
+          <button class="button ghost" id="export-settlements" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 4v12M8 12l4 4 4-4M5 20h14"/></svg>Exporter le plan
+          </button>
+        </div>
+
+        <div class="settlement-summary">
+          <div><span>Volume initial</span><strong id="settlement-gross">—</strong></div>
+          <div class="arrow-step"><span>−</span></div>
+          <div><span>Compensation</span><strong class="green-text" id="settlement-cleared">—</strong></div>
+          <div class="arrow-step"><span>=</span></div>
+          <div class="highlight"><span>À régler</span><strong id="settlement-net">—</strong></div>
+        </div>
+
+        <div class="settlement-layout">
+          <article class="card">
+            <div class="card-header">
+              <div><span class="section-label">Instructions</span><h3>Virements résiduels</h3></div>
+              <span class="count-pill" id="settlement-count">0 virement</span>
+            </div>
+            <div class="settlement-list" id="settlement-list"></div>
+          </article>
+
+          <aside class="card approval-card">
+            <div class="card-header compact"><div><span class="section-label">Consentement</span><h3>Validation des parties</h3></div></div>
+            <div class="approval-progress"><div><span id="approval-text">0 sur 0 validées</span><strong id="approval-rate">0%</strong></div><div class="progress-track"><i id="approval-bar"></i></div></div>
+            <div class="approval-list" id="approval-list"></div>
+            <button class="button primary full" id="approve-all" type="button">Valider toutes les parties</button>
+            <button class="button success full" id="mark-ready" type="button" disabled>Marquer le cycle prêt</button>
+            <p class="fine-print centered" id="cycle-status-copy">Simulation uniquement — aucun paiement ne sera initié.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" data-view="settings">
+        <div class="section-intro">
+          <div><span class="section-label">Configuration</span><h2>Paramètres du prototype</h2><p>Contrôlez les données stockées dans ce navigateur et les hypothèses de calcul.</p></div>
+        </div>
+        <div class="settings-grid">
+          <article class="card settings-card">
+            <div class="settings-icon green-bg">€</div>
+            <div><h3>Moteur de compensation</h3><p>Les positions sont calculées en centimes. Les factures ouvertes et en retard sont incluses ; les factures payées ou litigieuses sont exclues.</p></div>
+            <span class="settings-value">EUR</span>
+          </article>
+          <article class="card settings-card">
+            <div class="settings-icon blue-bg">⌁</div>
+            <div><h3>Stockage local</h3><p>Les factures, approbations et préférences restent dans le stockage de votre navigateur.</p></div>
+            <span class="settings-value good">Actif</span>
+          </article>
+          <article class="card settings-card">
+            <div class="settings-icon orange-bg">!</div>
+            <div><h3>Cadre d’utilisation</h3><p>SettleMesh produit une simulation. Il ne réalise ni novation, ni cession de créance, ni mouvement de fonds.</p></div>
+            <span class="settings-value">Simulation</span>
+          </article>
+        </div>
+        <article class="card danger-zone">
+          <div><span class="section-label">Gestion des données</span><h3>Réinitialiser l’espace de travail</h3><p>Recharge le portefeuille de démonstration et efface les approbations enregistrées.</p></div>
+          <button class="button danger" id="reset-data" type="button">Réinitialiser les données</button>
+        </article>
+        <article class="method-card">
+          <div><span class="method-number">01</span><h3>Bilatéral</h3><p>Les obligations opposées entre deux entreprises sont d’abord compensées.</p></div>
+          <div><span class="method-number">02</span><h3>Multilatéral</h3><p>Chaque entreprise est ramenée à une position nette débitrice ou créditrice.</p></div>
+          <div><span class="method-number">03</span><h3>Règlement</h3><p>Un ensemble déterministe de virements règle exactement les positions finales.</p></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="invoice-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header"><div><span class="section-label">Nouvelle obligation</span><h2 id="modal-title">Ajouter une facture</h2></div><button class="icon-button" id="close-modal" type="button" aria-label="Fermer">×</button></div>
+      <form id="invoice-form">
+        <div class="form-grid">
+          <label><span>Référence</span><input name="id" placeholder="INV-2026-001"></label>
+          <label><span>Montant EUR *</span><input name="amount" type="number" min="0.01" step="0.01" required placeholder="25000"></label>
+          <label><span>Fournisseur *</span><input name="supplier" required list="entity-options" placeholder="Entreprise créditrice"></label>
+          <label><span>Client débiteur *</span><input name="customer" required list="entity-options" placeholder="Entreprise qui doit payer"></label>
+          <label><span>Date d’échéance</span><input name="dueDate" type="date"></label>
+          <label><span>Statut</span><select name="status"><option value="open">Ouverte</option><option value="overdue">En retard</option><option value="disputed">En litige</option><option value="paid">Payée</option></select></label>
+        </div>
+        <datalist id="entity-options"></datalist>
+        <div class="modal-note"><strong>À savoir</strong><span>Une facture ouverte sera immédiatement intégrée au prochain calcul.</span></div>
+        <div class="modal-actions"><button class="button ghost" id="cancel-modal" type="button">Annuler</button><button class="button primary" type="submit">Ajouter au cycle</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="confirm-popover" id="delete-confirm" hidden>
+    <strong>Supprimer cette facture ?</strong><span>Cette action modifie immédiatement le plan.</span>
+    <div><button type="button" data-confirm="cancel">Annuler</button><button class="delete" type="button" data-confirm="delete">Supprimer</button></div>
+  </div>
+
+  <div class="toast-region" id="toast-region" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

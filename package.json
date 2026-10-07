@@ -1,0 +1,11 @@
+{
+  "name": "settlemesh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check dist/core.js && node --check dist/app.js",
+    "serve": "node scripts/serve.mjs"
+  }
+}
