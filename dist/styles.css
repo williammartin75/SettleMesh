@@ -379,3 +379,21 @@ body.public-mode .checker-header::before { content: "eurule"; position: absolute
   .upload-panel { padding: 24px 18px; }
   .result-summary { align-items: flex-start; }
 }
+
+.validation-progress {
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 13px 15px;
+  border: 1px solid rgba(127,196,42,.34);
+  border-radius: 14px;
+  background: rgba(219,255,170,.28);
+}
+.validation-progress:not([hidden]) { display: flex; }
+.validation-progress div { display: grid; gap: 2px; }
+.validation-progress strong { font-size: 10px; color: var(--ink); }
+.validation-progress small { color: var(--muted); font-size: 8px; }
+.progress-spinner { width: 22px; height: 22px; flex: 0 0 auto; border: 3px solid rgba(22,45,43,.16); border-top-color: var(--lime-dark); border-radius: 999px; animation: eurule-spin .8s linear infinite; }
+.upload-panel.processing .drop-area { opacity: .62; }
+@keyframes eurule-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .progress-spinner { animation-duration: 1.8s; } }

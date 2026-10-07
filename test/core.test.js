@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_PROFILE,
+  appendValidationChecks,
   createCheckLink,
   createDemoXml,
   decodeProfile,
@@ -76,4 +77,28 @@ test("les exemples UBL reflètent les exigences du profil", () => {
   assert.doesNotMatch(invalid, /PO-2026-042/);
   assert.match(valid, /PO-2026-042/);
   assert.match(valid, new RegExp(DEFAULT_PROFILE.vatId));
+  assert.match(valid, /CustomizationID/);
+  assert.match(valid, /ClassifiedTaxCategory/);
+});
+
+test("rejette les placeholders comme numéro de commande", () => {
+  const result = validateInvoice({
+    syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-4", issueDate: "2026-10-07", currency: "EUR",
+    supplierName: "Studio", supplierVat: "FR123", buyerName: DEFAULT_PROFILE.legalName,
+    buyerVat: DEFAULT_PROFILE.vatId, buyerEndpoint: DEFAULT_PROFILE.peppolId, purchaseOrder: "n/a",
+    taxExclusive: 10, taxAmount: 2, taxInclusive: 12, payableAmount: 12, lineCount: 1
+  }, DEFAULT_PROFILE);
+  assert.equal(result.checks.find((item) => item.id === "po").status, "error");
+});
+
+test("intègre les résultats du validateur officiel dans le score", () => {
+  const base = validateInvoice({
+    syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-5", issueDate: "2026-10-07", currency: "EUR",
+    supplierName: "Studio", supplierVat: "FR123", buyerName: DEFAULT_PROFILE.legalName,
+    buyerVat: DEFAULT_PROFILE.vatId, buyerEndpoint: DEFAULT_PROFILE.peppolId, purchaseOrder: "PO-5",
+    taxExclusive: 10, taxAmount: 2, taxInclusive: 12, payableAmount: 12, lineCount: 1
+  }, DEFAULT_PROFILE);
+  const result = appendValidationChecks(base, [{ id: "BR-TEST", status: "error", title: "Erreur officielle", message: "Test", fix: "", field: "BR-TEST" }], { en16931: "1.3.16" });
+  assert.equal(result.outcome, "blocked");
+  assert.equal(result.standards.en16931, "1.3.16");
 });

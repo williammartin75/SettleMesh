@@ -1,5 +1,7 @@
 .DS_Store
 Thumbs.db
 *.log
+node_modules/
 .sites/
 settlemesh-site.zip
+eurule-site-*.tgz

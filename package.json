@@ -4,8 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:validator": "node scripts/build-validation-assets.mjs",
     "test": "node --test",
-    "check": "node --check dist/core.js && node --check dist/app.js",
+    "check": "node --check dist/core.js && node --check dist/app.js && node --check dist/facturx.js && node --check dist/standards.js",
     "serve": "node scripts/serve.mjs"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "6.4.299",
+    "saxon-js": "2.7.0",
+    "xslt3": "2.7.0"
   }
 }

@@ -2,8 +2,8 @@ export const DEFAULT_PROFILE = Object.freeze({
   companyName: "Atelier Nova",
   legalName: "Atelier Nova SAS",
   country: "FR",
-  vatId: "FR40123456789",
-  peppolId: "0009:123456789",
+  vatId: "FR11123456782",
+  peppolId: "0009:123456782",
   routingProvider: "Plateforme agréée de démonstration",
   acceptedFormats: ["UBL", "CII", "FACTUR-X"],
   acceptedCurrencies: ["EUR"],
@@ -39,6 +39,12 @@ const number = (value) => {
 
 const cleanId = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const textEncoder = new TextEncoder();
+const electronicAddress = (scope, localName) => {
+  const element = node(scope, localName);
+  const value = element?.textContent?.trim() || "";
+  const scheme = element?.getAttribute?.("schemeID")?.trim() || "";
+  return value && scheme && !value.startsWith(`${scheme}:`) ? `${scheme}:${value}` : value;
+};
 
 export function profileSlug(name) {
   return String(name || "entreprise")
@@ -112,13 +118,15 @@ export function parseInvoiceXml(xmlText) {
     const order = node(root, "OrderReference");
     return {
       syntax: "UBL", documentType: rootName === "CreditNote" ? "Avoir" : "Facture",
+      customizationId: directField(root, "CustomizationID"), profileId: directField(root, "ProfileID"),
+      documentTypeCode: directField(root, rootName === "CreditNote" ? "CreditNoteTypeCode" : "InvoiceTypeCode"),
       invoiceNumber: directField(root, "ID"), issueDate: directField(root, "IssueDate"),
       currency: directField(root, "DocumentCurrencyCode"), buyerReference: directField(root, "BuyerReference"),
       purchaseOrder: directField(order, "ID"),
       supplierName: field(node(supplier, "PartyLegalEntity"), "RegistrationName") || field(node(supplier, "PartyName"), "Name"),
-      supplierVat: field(node(supplier, "PartyTaxScheme"), "CompanyID"), supplierEndpoint: field(supplier, "EndpointID"),
+      supplierVat: field(node(supplier, "PartyTaxScheme"), "CompanyID"), supplierEndpoint: electronicAddress(supplier, "EndpointID"),
       buyerName: field(node(buyer, "PartyLegalEntity"), "RegistrationName") || field(node(buyer, "PartyName"), "Name"),
-      buyerVat: field(node(buyer, "PartyTaxScheme"), "CompanyID"), buyerEndpoint: field(buyer, "EndpointID"),
+      buyerVat: field(node(buyer, "PartyTaxScheme"), "CompanyID"), buyerEndpoint: electronicAddress(buyer, "EndpointID"),
       lineTotal: number(directField(node(root, "LegalMonetaryTotal"), "LineExtensionAmount")),
       taxExclusive: number(directField(node(root, "LegalMonetaryTotal"), "TaxExclusiveAmount")),
       taxAmount: number(directField(node(root, "TaxTotal"), "TaxAmount")),
@@ -130,6 +138,7 @@ export function parseInvoiceXml(xmlText) {
   }
 
   const header = node(root, "ExchangedDocument");
+  const context = node(root, "ExchangedDocumentContext");
   const transaction = node(root, "SupplyChainTradeTransaction");
   const agreement = node(transaction, "ApplicableHeaderTradeAgreement");
   const settlement = node(transaction, "ApplicableHeaderTradeSettlement");
@@ -140,12 +149,15 @@ export function parseInvoiceXml(xmlText) {
     .map((registration) => field(registration, "ID")).find(Boolean) || "";
   return {
     syntax: "CII", documentType: "Facture", invoiceNumber: directField(header, "ID"),
+    customizationId: field(node(context, "GuidelineSpecifiedDocumentContextParameter"), "ID"),
+    profileId: field(node(context, "BusinessProcessSpecifiedDocumentContextParameter"), "ID"),
+    documentTypeCode: directField(header, "TypeCode"),
     issueDate: field(node(header, "IssueDateTime"), "DateTimeString"), currency: directField(settlement, "InvoiceCurrencyCode"),
     buyerReference: directField(agreement, "BuyerReference"),
     purchaseOrder: field(node(agreement, "BuyerOrderReferencedDocument"), "IssuerAssignedID"),
     supplierName: directField(supplier, "Name"), supplierVat: taxRegistration(supplier),
-    supplierEndpoint: field(supplier, "URIUniversalCommunication"), buyerName: directField(buyer, "Name"),
-    buyerVat: taxRegistration(buyer), buyerEndpoint: field(buyer, "URIUniversalCommunication"),
+    supplierEndpoint: electronicAddress(node(supplier, "URIUniversalCommunication"), "URIID") || field(supplier, "URIUniversalCommunication"), buyerName: directField(buyer, "Name"),
+    buyerVat: taxRegistration(buyer), buyerEndpoint: electronicAddress(node(buyer, "URIUniversalCommunication"), "URIID") || field(buyer, "URIUniversalCommunication"),
     lineTotal: number(directField(totals, "LineTotalAmount")), taxExclusive: number(directField(totals, "TaxBasisTotalAmount")),
     taxAmount: number(field(settlement, "TaxTotalAmount")), taxInclusive: number(directField(totals, "GrandTotalAmount")),
     payableAmount: number(directField(totals, "DuePayableAmount")),
@@ -163,10 +175,19 @@ const fuzzySame = (a, b) => {
   const left = canonicalCompany(a); const right = canonicalCompany(b);
   return Boolean(left && right && left === right);
 };
+const meaningfulReference = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  return Boolean(normalized && !["na", "none", "aucun", "sans", "notapplicable", "nonapplicable"].includes(normalized));
+};
 
 export function validateInvoice(invoice, profile = DEFAULT_PROFILE) {
   const checks = [];
   checks.push(check("syntax", "pass", `Format ${invoice.syntax} reconnu`, `${invoice.documentType} structurée et lisible.`, "", "Document"));
+  const receivedFormat = invoice.container === "FACTUR-X" ? "FACTUR-X" : invoice.syntax;
+  const acceptedFormats = profile.acceptedFormats || [];
+  checks.push(acceptedFormats.includes(receivedFormat)
+    ? check("accepted-format", "pass", `${receivedFormat} accepté par le destinataire`, acceptedFormats.join(", "), "", "Format")
+    : check("accepted-format", "error", `${receivedFormat} non accepté par le destinataire`, `Formats attendus : ${acceptedFormats.join(", ") || "aucun format configuré"}.`, "Exportez la facture dans l’un des formats annoncés par le destinataire.", "Format"));
   checks.push(invoice.invoiceNumber
     ? check("number", "pass", "Numéro de facture présent", invoice.invoiceNumber, "", "BT-1")
     : check("number", "error", "Numéro de facture manquant", "Chaque facture doit porter un identifiant unique.", "Ajoutez le numéro dans le champ BT-1.", "BT-1"));
@@ -203,17 +224,17 @@ export function validateInvoice(invoice, profile = DEFAULT_PROFILE) {
       : check("buyer-vat", "error", "TVA du destinataire différente", `Trouvé : ${invoice.buyerVat} · attendu : ${profile.vatId}.`, `Utilisez ${profile.vatId} dans BT-48.`, "BT-48"));
 
   if (profile.requirePurchaseOrder) {
-    checks.push(invoice.purchaseOrder
+    checks.push(meaningfulReference(invoice.purchaseOrder)
       ? check("po", "pass", "Numéro de commande présent", invoice.purchaseOrder, "", "BT-13")
-      : check("po", "error", "Numéro de commande manquant", `${profile.companyName} exige une référence de commande.`, "Ajoutez le numéro communiqué par votre contact dans BT-13.", "BT-13"));
+      : check("po", "error", "Numéro de commande manquant ou inutilisable", `${profile.companyName} exige une vraie référence de commande${invoice.purchaseOrder ? ` ; « ${invoice.purchaseOrder} » est un placeholder.` : "."}`, "Ajoutez le numéro communiqué par votre contact dans BT-13.", "BT-13"));
   } else {
-    checks.push(check("po", invoice.purchaseOrder ? "pass" : "info", "Numéro de commande facultatif", invoice.purchaseOrder || "Aucune référence fournie.", "", "BT-13"));
+    checks.push(check("po", meaningfulReference(invoice.purchaseOrder) ? "pass" : "info", "Numéro de commande facultatif", meaningfulReference(invoice.purchaseOrder) ? invoice.purchaseOrder : "Aucune référence exploitable fournie.", "", "BT-13"));
   }
 
   if (profile.requireBuyerReference) {
-    checks.push(invoice.buyerReference
+    checks.push(meaningfulReference(invoice.buyerReference)
       ? check("buyer-reference", "pass", "Référence acheteur présente", invoice.buyerReference, "", "BT-10")
-      : check("buyer-reference", "error", "Référence acheteur manquante", "Le destinataire utilise cette référence pour router la facture.", "Ajoutez le code service ou contact dans BT-10.", "BT-10"));
+      : check("buyer-reference", "error", "Référence acheteur manquante ou inutilisable", "Le destinataire utilise cette référence pour router la facture.", "Ajoutez un vrai code service ou contact dans BT-10.", "BT-10"));
   }
 
   if (profile.requireEndpoint) {
@@ -239,14 +260,22 @@ export function validateInvoice(invoice, profile = DEFAULT_PROFILE) {
     ? check("lines", "pass", `${invoice.lineCount} ligne${invoice.lineCount > 1 ? "s" : ""} détectée${invoice.lineCount > 1 ? "s" : ""}`, "Structure de détail lisible.", "", "BG-25")
     : check("lines", "warning", "Aucune ligne détectée", "Le document ne contient pas de ligne de facturation reconnue.", "Ajoutez au moins une ligne de bien ou service.", "BG-25"));
 
-  const counts = checks.reduce((acc, item) => { acc[item.status] = (acc[item.status] || 0) + 1; return acc; }, { pass: 0, error: 0, warning: 0, info: 0 });
-  const scoreable = checks.filter((item) => item.status !== "info").length || 1;
+  return recalculateResult({
+    id: `CHK-${Date.now().toString(36).toUpperCase()}`, checkedAt: new Date().toISOString(), checks,
+    invoice: { ...invoice, raw: undefined }, recipient: profile.companyName
+  });
+}
+
+export function recalculateResult(result) {
+  const counts = result.checks.reduce((acc, item) => { acc[item.status] = (acc[item.status] || 0) + 1; return acc; }, { pass: 0, error: 0, warning: 0, info: 0 });
+  const scoreable = result.checks.filter((item) => item.status !== "info").length || 1;
   const score = Math.round(((counts.pass + counts.warning * 0.45) / scoreable) * 100);
   const outcome = counts.error ? "blocked" : counts.warning ? "review" : "ready";
-  return {
-    id: `CHK-${Date.now().toString(36).toUpperCase()}`, checkedAt: new Date().toISOString(), outcome, score, counts, checks,
-    invoice: { ...invoice, raw: undefined }, recipient: profile.companyName
-  };
+  return { ...result, counts, score, outcome };
+}
+
+export function appendValidationChecks(result, checks, metadata = {}) {
+  return recalculateResult({ ...result, checks: [...result.checks, ...checks], standards: metadata });
 }
 
 export function resultSummary(result) {
@@ -264,14 +293,21 @@ export function createDemoXml({ valid = false, profile = DEFAULT_PROFILE } = {})
   const po = valid ? "<cac:OrderReference><cbc:ID>PO-2026-042</cbc:ID></cac:OrderReference>" : "";
   const buyer = valid ? profile.legalName : "Atelier Nova Holding";
   const buyerVat = valid ? profile.vatId : "FR99999999999";
-  const endpoint = valid ? profile.peppolId : "0009:999999999";
+  const [configuredScheme = "0009", configuredEndpoint = "123456782"] = String(profile.peppolId || "0009:123456782").split(":");
+  const endpointScheme = valid ? configuredScheme : "0009";
+  const endpoint = valid ? configuredEndpoint : "999999999";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
-  <cbc:ID>INV-2026-1042</cbc:ID><cbc:IssueDate>2026-10-07</cbc:IssueDate><cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode><cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>${po}
-  <cac:AccountingSupplierParty><cac:Party><cbc:EndpointID schemeID="0009">552100554</cbc:EndpointID><cac:PartyName><cbc:Name>Studio Horizon SAS</cbc:Name></cac:PartyName><cac:PartyTaxScheme><cbc:CompanyID>FR82552100554</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme><cac:PartyLegalEntity><cbc:RegistrationName>Studio Horizon SAS</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
-  <cac:AccountingCustomerParty><cac:Party><cbc:EndpointID schemeID="0009">${endpoint}</cbc:EndpointID><cac:PartyName><cbc:Name>${buyer}</cbc:Name></cac:PartyName><cac:PartyTaxScheme><cbc:CompanyID>${buyerVat}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme><cac:PartyLegalEntity><cbc:RegistrationName>${buyer}</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingCustomerParty>
-  <cac:TaxTotal><cbc:TaxAmount currencyID="EUR">240.00</cbc:TaxAmount></cac:TaxTotal><cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="EUR">1200.00</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="EUR">1200.00</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="EUR">1440.00</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="EUR">1440.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
-  <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="H87">1</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">1200.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Mission de conseil</cbc:Name></cac:Item><cac:Price><cbc:PriceAmount currencyID="EUR">1200.00</cbc:PriceAmount></cac:Price></cac:InvoiceLine>
+  <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0</cbc:CustomizationID>
+  <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+  <cbc:ID>INV-2026-1042</cbc:ID><cbc:IssueDate>2026-10-07</cbc:IssueDate><cbc:DueDate>2026-11-06</cbc:DueDate><cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode><cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>${po}
+  <cac:AccountingSupplierParty><cac:Party><cbc:EndpointID schemeID="0009">552100554</cbc:EndpointID><cac:PartyIdentification><cbc:ID schemeID="0009">552100554</cbc:ID></cac:PartyIdentification><cac:PartyName><cbc:Name>Studio Horizon SAS</cbc:Name></cac:PartyName><cac:PostalAddress><cbc:StreetName>12 rue des Ateliers</cbc:StreetName><cbc:CityName>Paris</cbc:CityName><cbc:PostalZone>75011</cbc:PostalZone><cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country></cac:PostalAddress><cac:PartyTaxScheme><cbc:CompanyID>FR96552100554</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme><cac:PartyLegalEntity><cbc:RegistrationName>Studio Horizon SAS</cbc:RegistrationName><cbc:CompanyID schemeID="0009">552100554</cbc:CompanyID></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party><cbc:EndpointID schemeID="${endpointScheme}">${endpoint}</cbc:EndpointID><cac:PartyIdentification><cbc:ID schemeID="${endpointScheme}">${endpoint}</cbc:ID></cac:PartyIdentification><cac:PartyName><cbc:Name>${buyer}</cbc:Name></cac:PartyName><cac:PostalAddress><cbc:StreetName>8 avenue de l’Europe</cbc:StreetName><cbc:CityName>Lyon</cbc:CityName><cbc:PostalZone>69002</cbc:PostalZone><cac:Country><cbc:IdentificationCode>${profile.country || "FR"}</cbc:IdentificationCode></cac:Country></cac:PostalAddress><cac:PartyTaxScheme><cbc:CompanyID>${buyerVat}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme><cac:PartyLegalEntity><cbc:RegistrationName>${buyer}</cbc:RegistrationName><cbc:CompanyID schemeID="${endpointScheme}">${endpoint}</cbc:CompanyID></cac:PartyLegalEntity></cac:Party></cac:AccountingCustomerParty>
+  <cac:PaymentMeans><cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cbc:PaymentID>INV-2026-1042</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>FR7630006000011234567890189</cbc:ID></cac:PayeeFinancialAccount></cac:PaymentMeans>
+  <cac:PaymentTerms><cbc:Note>Paiement à 30 jours</cbc:Note></cac:PaymentTerms>
+  <cac:TaxTotal><cbc:TaxAmount currencyID="EUR">240.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount currencyID="EUR">1200.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="EUR">240.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>20</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="EUR">1200.00</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="EUR">1200.00</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="EUR">1440.00</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="EUR">1440.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+  <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="H87">1</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">1200.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Mission de conseil</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>20</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory></cac:Item><cac:Price><cbc:PriceAmount currencyID="EUR">1200.00</cbc:PriceAmount></cac:Price></cac:InvoiceLine>
 </Invoice>`;
 }
 

@@ -1,5 +1,6 @@
 import {
   DEFAULT_PROFILE,
+  appendValidationChecks,
   createCheckLink,
   createDemoXml,
   decodeProfile,
@@ -9,6 +10,8 @@ import {
   resultSummary,
   validateInvoice
 } from "./core.js";
+import { extractFacturXXml } from "./facturx.js";
+import { validateEuropeanStandard } from "./standards.js";
 
 const STORAGE_KEY = "eurule-checklink-v1";
 const TITLES = {
@@ -25,8 +28,11 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    const profile = { ...clone(DEFAULT_PROFILE), ...(saved?.profile || {}) };
+    if (profile.peppolId === "0009:123456789") profile.peppolId = DEFAULT_PROFILE.peppolId;
+    if (profile.vatId === "FR40123456789") profile.vatId = DEFAULT_PROFILE.vatId;
     return {
-      profile: { ...clone(DEFAULT_PROFILE), ...(saved?.profile || {}) },
+      profile,
       history: Array.isArray(saved?.history) ? saved.history.slice(0, 50) : [],
       lastResult: saved?.lastResult || null
     };
@@ -61,6 +67,14 @@ function download(filename, content, type = "text/plain;charset=utf-8") {
   const link = document.createElement("a");
   link.href = url; link.download = filename; link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 500);
+}
+
+function setValidationProgress(active, message = "") {
+  const progress = $("#validation-progress");
+  progress.hidden = !active;
+  $("#validation-progress-text").textContent = message;
+  $("#upload-panel").classList.toggle("processing", active);
+  $$("button, input, textarea", $("#upload-panel")).forEach((element) => { element.disabled = active; });
 }
 
 function linkFor(profile = state.profile) { return createCheckLink(profile, window.location); }
@@ -213,16 +227,28 @@ function renderResult(result) {
   $("#result-summary").className = `result-summary ${result.outcome}`;
   $("#result-summary").innerHTML = `<div><span class="section-label">${escapeHtml(result.id)}</span><h3>${escapeHtml(summary.label)}</h3><p>${escapeHtml(summary.headline)}</p></div><div class="score-orb"><strong>${result.score}</strong><span>sur 100</span></div>`;
   $("#checks-list").innerHTML = result.checks.map((item) => `<article class="check-row ${item.status}"><span class="check-status">${item.status === "pass" ? "✓" : item.status === "error" ? "×" : item.status === "warning" ? "!" : "i"}</span><div><h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.message)}</p>${item.fix ? `<div class="fix"><strong>Comment corriger :</strong> ${escapeHtml(item.fix)}</div>` : ""}</div><span class="field-code">${escapeHtml(item.field)}</span></article>`).join("");
-  $("#result-side").innerHTML = `<span class="section-label">Document analysé</span><h3>${escapeHtml(result.invoice.invoiceNumber || "Sans numéro")}</h3><div class="result-fact"><span>Fournisseur</span><strong>${escapeHtml(result.invoice.supplierName || "Non lu")}</strong></div><div class="result-fact"><span>Destinataire</span><strong>${escapeHtml(result.invoice.buyerName || "Non lu")}</strong></div><div class="result-fact"><span>Format</span><strong>${escapeHtml(result.invoice.syntax)}</strong></div><div class="result-fact"><span>Montant</span><strong>${result.invoice.payableAmount != null ? `${result.invoice.payableAmount.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} ${escapeHtml(result.invoice.currency)}` : "Non lu"}</strong></div><button class="button primary full" type="button" id="download-report">Télécharger le rapport</button><button class="button ghost full" type="button" id="new-check">Contrôler une autre facture</button><p class="disclaimer">Aide à la préparation. Ce résultat ne constitue pas une certification juridique.</p>`;
+  $("#result-side").innerHTML = `<span class="section-label">Document analysé</span><h3>${escapeHtml(result.invoice.invoiceNumber || "Sans numéro")}</h3><div class="result-fact"><span>Fournisseur</span><strong>${escapeHtml(result.invoice.supplierName || "Non lu")}</strong></div><div class="result-fact"><span>Destinataire</span><strong>${escapeHtml(result.invoice.buyerName || "Non lu")}</strong></div><div class="result-fact"><span>Format</span><strong>${escapeHtml(result.invoice.container === "FACTUR-X" ? "Factur-X · CII" : result.invoice.syntax)}</strong></div><div class="result-fact"><span>Norme</span><strong>EN 16931 ${escapeHtml(result.standards?.en16931 || "précontrôle")}</strong></div><div class="result-fact"><span>Montant</span><strong>${result.invoice.payableAmount != null ? `${result.invoice.payableAmount.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} ${escapeHtml(result.invoice.currency)}` : "Non lu"}</strong></div><button class="button primary full" type="button" id="download-report">Télécharger le rapport</button><button class="button ghost full" type="button" id="new-check">Contrôler une autre facture</button><p class="disclaimer">Validation automatisée des artefacts indiqués, complétée par les exigences du destinataire. Ne constitue pas un avis juridique.</p>`;
   $("#download-report").addEventListener("click", () => download(`eurule-${result.invoice.invoiceNumber || result.id}.txt`, exportResultText(result)));
   $("#new-check").addEventListener("click", () => { area.hidden = true; $("#upload-panel").scrollIntoView({ behavior: "smooth" }); });
   area.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function analyze(xmlText) {
+async function analyze(xmlText, source = {}) {
   try {
-    const invoice = parseInvoiceXml(xmlText);
-    const result = validateInvoice(invoice, activeProfile());
+    setValidationProgress(true, "Lecture de la facture…");
+    const invoice = { ...parseInvoiceXml(xmlText), ...source };
+    let result = validateInvoice(invoice, activeProfile());
+    setValidationProgress(true, invoice.syntax === "UBL" ? "Validation EN 16931 et Peppol…" : "Validation EN 16931…");
+    try {
+      const official = await validateEuropeanStandard(xmlText, invoice);
+      result = appendValidationChecks(result, official.checks, official.metadata);
+    } catch (standardError) {
+      result = appendValidationChecks(result, [{
+        id: "official-validator-unavailable", status: "warning", title: "Validation officielle indisponible",
+        message: standardError.message || "Le moteur officiel n’a pas répondu.",
+        fix: "Relancez le contrôle avec une connexion stable.", field: "EN 16931"
+      }], { en16931: null, peppol: null, officialFailures: null });
+    }
     state.lastResult = result;
     state.history.unshift(result);
     state.history = state.history.slice(0, 50);
@@ -230,14 +256,28 @@ function analyze(xmlText) {
     toast("Contrôle terminé", resultSummary(result).headline);
   } catch (error) {
     toast("Fichier non analysé", error.message || "Le document ne peut pas être lu.");
+  } finally {
+    setValidationProgress(false);
   }
 }
 
 async function analyzeFile(file) {
   if (!file) return;
-  if (file.size > 5 * 1024 * 1024) return toast("Fichier trop volumineux", "La limite du MVP est fixée à 5 Mo.");
-  if (!/\.(xml|ubl|cii)$/i.test(file.name) && !/xml/i.test(file.type)) return toast("Format non pris en charge", "Utilisez un fichier XML UBL ou CII pour ce MVP.");
-  analyze(await file.text());
+  if (file.size > 20 * 1024 * 1024) return toast("Fichier trop volumineux", "La limite est fixée à 20 Mo.");
+  const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+  if (isPdf) {
+    setValidationProgress(true, "Extraction du XML Factur-X…");
+    try {
+      const extracted = await extractFacturXXml(file);
+      await analyze(extracted.xmlText, { container: extracted.container, attachmentName: extracted.attachmentName, originalFileName: file.name });
+    } catch (error) {
+      toast("Factur-X non analysé", error.message || "Le XML embarqué n’a pas pu être extrait.");
+      setValidationProgress(false);
+    }
+    return;
+  }
+  if (!/\.(xml|ubl|cii)$/i.test(file.name) && !/xml/i.test(file.type)) return toast("Format non pris en charge", "Utilisez un XML UBL/CII ou un PDF Factur-X.");
+  await analyze(await file.text(), { container: "XML", originalFileName: file.name });
 }
 
 function renderAll() {
@@ -272,10 +312,10 @@ function setupEvents() {
   ["dragleave", "drop"].forEach((name) => drop.addEventListener(name, (event) => { event.preventDefault(); drop.classList.remove("dragging"); }));
   drop.addEventListener("drop", (event) => analyzeFile(event.dataTransfer.files[0]));
   $("#invoice-file").addEventListener("change", (event) => analyzeFile(event.target.files[0]));
-  $("#demo-invalid").addEventListener("click", () => analyze(createDemoXml({ valid: false, profile: activeProfile() })));
-  $("#demo-valid").addEventListener("click", () => analyze(createDemoXml({ valid: true, profile: activeProfile() })));
+  $("#demo-invalid").addEventListener("click", () => analyze(createDemoXml({ valid: false, profile: activeProfile() }), { container: "XML", originalFileName: "demo-erreurs.xml" }));
+  $("#demo-valid").addEventListener("click", () => analyze(createDemoXml({ valid: true, profile: activeProfile() }), { container: "XML", originalFileName: "demo-conforme.xml" }));
   $("#paste-toggle").addEventListener("click", () => { $("#paste-box").hidden = !$("#paste-box").hidden; });
-  $("#analyze-pasted").addEventListener("click", () => analyze($("#xml-input").value));
+  $("#analyze-pasted").addEventListener("click", () => analyze($("#xml-input").value, { container: "XML", originalFileName: "xml-colle.xml" }));
   $("#clear-history").addEventListener("click", () => { state.history = []; state.lastResult = null; persist(); renderDashboard(); renderHistory(); toast("Historique effacé", "Les contrôles locaux ont été supprimés."); });
   window.addEventListener("hashchange", parseLocation);
 }

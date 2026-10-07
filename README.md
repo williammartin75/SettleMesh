@@ -1,13 +1,15 @@
 # Eurule CheckLink
 
-MVP de prévalidation des factures électroniques européennes. Une entreprise configure son profil de réception et partage un CheckLink avec ses fournisseurs. Ceux-ci contrôlent leur facture UBL ou CII avant transmission et reçoivent des corrections formulées en langage simple.
+MVP de prévalidation des factures électroniques européennes. Une entreprise configure son profil de réception et partage un CheckLink avec ses fournisseurs. Ceux-ci contrôlent leur facture UBL, CII ou Factur-X avant transmission et reçoivent des corrections formulées en langage simple.
 
 ## Fonctionnalités
 
 - configuration de l’entité destinataire, de son numéro de TVA et de son identifiant Peppol ;
 - sélection des formats, devises et références obligatoires ;
 - génération d’un CheckLink autonome et partageable ;
-- lecture locale des factures XML UBL et CII ;
+- lecture locale des factures XML UBL/CII et extraction du XML embarqué dans les PDF Factur-X ;
+- exécution locale des règles officielles EN 16931 v1.3.16 pour UBL et CII ;
+- exécution locale des règles Peppol BIS Billing 3.0.21 pour les documents UBL Peppol ;
 - contrôles du destinataire, de la TVA, de l’adresse électronique, du numéro de commande et des totaux ;
 - diagnostic détaillé avec références EN 16931 `BT-*` ;
 - rapport téléchargeable et historique local ;
@@ -19,6 +21,7 @@ MVP de prévalidation des factures électroniques européennes. Une entreprise c
 ```powershell
 npm test
 npm run check
+npm run build:validator
 npm run serve
 ```
 
@@ -33,4 +36,4 @@ Dans **Tester une facture**, utiliser :
 
 ## Périmètre
 
-Les contrôles sont une aide à la préparation et ne constituent ni une certification juridique ni une garantie d’acceptation. La validation complète contre les artefacts officiels EN 16931, VIES, OpenPeppol et les annuaires nationaux devra être activée par des connecteurs serveur lors d’un pilote réel.
+Les contrôles sont une aide à la préparation et ne constituent ni une certification juridique ni une garantie d’acceptation. Les artefacts EN 16931 et Peppol sont exécutés dans le navigateur, sans envoi de la facture à un serveur. Le MVP ne vérifie pas encore la conformité PDF/A-3 du conteneur Factur-X, le statut TVA VIES, l’existence d’un participant dans le Peppol Directory ou les règles nationales supplémentaires ; ces contrôles devront être ajoutés par des connecteurs et artefacts versionnés lors d’un pilote réel.
