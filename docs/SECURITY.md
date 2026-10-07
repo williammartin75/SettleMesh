@@ -1,6 +1,6 @@
 # Sécurité, confidentialité et modèle de menace
 
-> Revue interne du 7 octobre 2026, périmètre SettleMesh `0.9.0`. Ce document décrit des mesures techniques et des risques ; il ne constitue ni un audit externe, ni un avis juridique, ni une déclaration de conformité au RGPD.
+> Revue interne du 7 octobre 2026, périmètre SettleMesh `0.10.0`. Ce document décrit des mesures techniques et des risques ; il ne constitue ni un audit externe, ni un avis juridique, ni une déclaration de conformité au RGPD.
 
 ## 1. Périmètre et méthode
 
@@ -10,6 +10,7 @@ Constats vérifiés au 7 octobre 2026 :
 
 - le Site publié répond par une page `401` avant authentification ChatGPT ; le contenu de l'application n'est donc pas publiquement inspectable sans session autorisée ;
 - les factures et validateurs restent dans le navigateur ; seules les vérifications d’identité déclenchées explicitement envoient l’identifiant minimal au Worker et à la source officielle ;
+- le précontrôle PDF/A-3 lit les octets, métadonnées XMP et pièces jointes uniquement en mémoire locale, sans créer de nouveau flux réseau ni stockage ;
 - l'API refuse les requêtes de validation sans clé, les médias non JSON, les corps trop volumineux et les XML avec `DOCTYPE` ;
 - `npm audit`, dépendances de développement incluses, ne signale aucune vulnérabilité connue ;
 - les données dynamiques affichées et les exports CSV sont échappés ou neutralisés.
@@ -19,7 +20,7 @@ Constats vérifiés au 7 octobre 2026 :
 ```text
 Navigateur de l'utilisateur
   ├─ profil CheckLink et obligations Net ──> localStorage du même navigateur
-  ├─ facture XML/PDF ──> mémoire locale ──> PDF.js / DOMParser / SaxonJS
+  ├─ facture XML/PDF ──> mémoire locale ──> PDF.js / précontrôle PDF/A-3 / DOMParser / SaxonJS
   ├─ pays + TVA, sur clic ──> Worker sans stockage ──> VIES
   ├─ identifiant Peppol, sur clic ──> Worker sans stockage ──> Peppol Directory
   └─ export explicite ──> fichier choisi par l'utilisateur
@@ -56,6 +57,7 @@ L'historique persistant ne contient ni XML brut, ni acheteur, ni endpoint, ni r�
 | XSS lisant `localStorage` | Fuite de données financières | échappement systématique, CSP, dépendances same-origin | une extension navigateur ou une future injection pourrait lire les données locales |
 | XML avec entités externes | lecture locale, SSRF ou déni de service | rejet de `DOCTYPE` côté navigateur et API | maintenir ce rejet dans tout nouveau parseur |
 | PDF ou XML pathologique | saturation CPU/mémoire | limites de lot et de taille, traitement local | ajouter isolation worker, délais et tests de charge avant production |
+| Faux positif PDF/A-3 | archivage ou envoi d’un conteneur non conforme | contrôles XMP et `/AF`, portée « structurelle » explicite et contrôle informatif présent dans chaque rapport Factur-X | faire valider exhaustivement par veraPDF avant tout usage nécessitant une preuve ISO |
 | Clickjacking | action trompeuse | `frame-ancestors 'none'` et `X-Frame-Options: DENY` sur le serveur Node et le Worker | vérifier les en-têtes après chaque changement d’hébergeur |
 | Traversée de répertoire | lecture de fichiers serveur | résolution canonique sous `web/`, refus hors racine | couvert par test automatisé local |
 | Fuite ou brute force d'une clé API | accès interorganisation | clés fortes, hash SHA-256, comparaison constante, quotas | secrets, révocation et quotas restent en mémoire : blocage production |

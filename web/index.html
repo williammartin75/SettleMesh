@@ -38,7 +38,7 @@
         <span class="trust-icon">◎</span>
         <div><strong>Analyse locale</strong><small>Les factures restent dans ce navigateur.</small></div>
       </div>
-      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.9</strong></div>
+      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.10</strong></div>
     </aside>
 
     <main class="main">
@@ -165,7 +165,7 @@
           <div class="checker-layout">
             <article class="panel upload-panel" id="upload-panel">
               <div class="upload-icon">↥</div><h3>Déposez votre facture structurée</h3><p>Le contrôle s’effectue dans ce navigateur. Votre facture n’est ni transmise ni archivée.</p>
-              <div class="drop-area" id="drop-area" tabindex="0" role="button"><input id="invoice-file" type="file" multiple accept=".xml,.ubl,.cii,.pdf,application/xml,text/xml,application/pdf" hidden><strong>Glissez une ou plusieurs factures ici</strong><span>XML UBL / CII ou PDF Factur-X · 20 fichiers · 20 Mo max. par fichier</span></div>
+              <div class="drop-area" id="drop-area" tabindex="0" role="button"><input id="invoice-file" type="file" multiple accept=".xml,.ubl,.cii,.pdf,application/xml,text/xml,application/pdf" hidden><strong>Glissez une ou plusieurs factures ici</strong><span>XML UBL / CII ou PDF Factur-X avec précontrôle PDF/A-3 · 20 fichiers · 20 Mo max. par fichier</span></div>
               <div class="validation-progress" id="validation-progress" hidden><span class="progress-spinner" aria-hidden="true"></span><div><strong>Contrôle en cours</strong><small id="validation-progress-text">Lecture de la facture…</small></div></div>
               <div class="upload-divider"><span>ou tester maintenant</span></div>
               <div class="sample-actions"><button class="button secondary" id="demo-invalid" type="button">Exemple avec erreurs</button><button class="button ghost" id="demo-valid" type="button">Exemple conforme</button></div>
@@ -273,9 +273,10 @@
             <article class="source-card active-source"><div class="source-icon peppol">P</div><span class="source-state">Règles actives</span><h3>Peppol BIS 3.0.21</h3><p>Les factures UBL déclarant un profil Peppol sont aussi contrôlées avec le Schematron OpenPeppol.</p><a href="https://docs.peppol.eu/poacc/billing/3.0/" target="_blank" rel="noreferrer">Voir la spécification ↗</a></article>
             <article class="source-card active-source"><div class="source-icon vies">V</div><span class="source-state">Connecteur actif</span><h3>VIES</h3><p>Validation à la demande du numéro de TVA auprès du service de la Commission européenne, sans mise en cache.</p><a href="https://ec.europa.eu/taxation_customs/vies/" target="_blank" rel="noreferrer">Ouvrir VIES ↗</a></article>
             <article class="source-card active-source"><div class="source-icon peppol">PD</div><span class="source-state">Connecteur actif</span><h3>Peppol Directory</h3><p>Recherche exacte d’un participant déclaré dans l’annuaire OpenPeppol ; cette présence ne prouve pas sa joignabilité SMP.</p><a href="https://directory.peppol.eu/public/menuitem-docs-rest-api" target="_blank" rel="noreferrer">Voir l’API officielle ↗</a></article>
+            <article class="source-card active-source"><div class="source-icon pdfa">A3</div><span class="source-state">Précontrôle local actif</span><h3>PDF/A-3 · Factur-X</h3><p>Vérification locale de la déclaration XMP, du profil Factur-X, du nom du XML et de son association au PDF. Une validation ISO exhaustive avec veraPDF reste nécessaire.</p><a href="https://docs.verapdf.org/validation/" target="_blank" rel="noreferrer">Voir le validateur veraPDF ↗</a></article>
             <article class="source-card"><div class="source-icon profile-source">◎</div><span class="source-state">Actif dans le MVP</span><h3>Règles de l’acheteur</h3><p>Entité, adresse électronique, devises et références internes configurées dans CheckLink.</p><button class="source-link" type="button" data-route="profile">Modifier les règles →</button></article>
           </div>
-          <article class="panel boundary-card"><div><span class="section-label">Périmètre du prototype</span><h3>Ce que signifie un résultat SettleMesh</h3></div><p>SettleMesh CheckLink exécute les artefacts indiqués et les règles du destinataire. VIES confirme un statut TVA ponctuel ; Peppol Directory confirme une présence d’annuaire. Aucun de ces résultats n’est un avis juridique ni une garantie d’acceptation par une administration, un client ou une plateforme agréée.</p></article>
+          <article class="panel boundary-card"><div><span class="section-label">Périmètre du prototype</span><h3>Ce que signifie un résultat SettleMesh</h3></div><p>SettleMesh CheckLink exécute les artefacts indiqués et les règles du destinataire. VIES confirme un statut TVA ponctuel ; Peppol Directory confirme une présence d’annuaire ; PDF/A-3 reste un précontrôle structurel, pas une certification ISO. Aucun de ces résultats n’est un avis juridique ni une garantie d’acceptation par une administration, un client ou une plateforme agréée.</p></article>
         </section>
       </div>
     </main>

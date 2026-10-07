@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.9.0` |
-| État | MVP fonctionnel durci, avec métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié et API de validation locale authentifiée ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.10.0` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié et API de validation locale authentifiée ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 7 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 53 tests au 7 octobre 2026 |
+| Tests automatisés | 56 tests au 7 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -132,7 +132,8 @@ Légende :
 | Profil | Export/import JSON portable | Opérationnel | Fichier local, pas de gestion de versions distante |
 | Facture | Lecture UBL Invoice et CreditNote | Opérationnel | Sous-ensembles testés, pas toutes les variantes nationales |
 | Facture | Lecture CII | Opérationnel | Sous-ensembles testés |
-| Facture | Extraction XML d'un PDF Factur-X | Opérationnel | Ne certifie pas encore le conteneur PDF/A-3 |
+| Facture | Extraction XML d'un PDF Factur-X | Opérationnel | XML et métadonnées du conteneur traités localement |
+| Facture | Précontrôle structurel PDF/A-3 | Partiel | XMP, profil Factur-X, nom du XML et association `/AF` ; validation ISO exhaustive veraPDF encore absente |
 | Normes | EN 16931 v1.3.16 UBL/CII | Opérationnel | Artefacts à surveiller et mettre à jour |
 | Normes | Peppol BIS Billing 3.0.21 | Opérationnel | Déclenché sur les UBL déclarant un profil Peppol |
 | Règles acheteur | Entité, TVA, devise, références, endpoint | Opérationnel | Les règles doivent rester explicables et déterministes |
@@ -325,6 +326,7 @@ Sources actives :
 
 - EN 16931 version 1.3.16 pour UBL et CII ;
 - Peppol BIS Billing version 3.0.21 pour les UBL déclarant ce profil ;
+- précontrôle local PDF/A-3 des conteneurs Factur-X ;
 - VIES pour une validation ponctuelle d’un numéro TVA ;
 - Peppol Directory pour une recherche exacte de participant ;
 - règles configurées par le destinataire.
@@ -363,6 +365,8 @@ Les valeurs comme `N/A`, `none`, `aucun` ou `sans` ne sont pas considérées com
 - SaxonJS exécute dans le navigateur les artefacts compilés en SEF.
 - EN 16931 est exécuté pour UBL et CII.
 - Peppol est ajouté si le `CustomizationID` indique Peppol.
+- Pour Factur-X, SettleMesh vérifie localement `pdfaid:part`, le niveau PDF/A déclaré, les propriétés XMP Factur-X, la concordance du nom XML et les marqueurs `/AF` et `/AFRelationship` lisibles.
+- Ce précontrôle ne vérifie pas toutes les règles ISO 19005-3, notamment les polices, espaces colorimétriques, profils ICC, actions ou contraintes de rendu ; seul un validateur complet tel que veraPDF peut fournir ce niveau de contrôle.
 - Au maximum 24 erreurs d'un rapport normatif sont détaillées à l'écran ; les suivantes sont condensées.
 - Une indisponibilité du moteur officiel devient un avertissement explicite, pas une validation silencieuse.
 
@@ -437,7 +441,7 @@ SettleMesh/
 │   ├── storage.js               persistance locale et migration de l'ancienne marque
 │   ├── svrl.js                  lecture partagée des rapports de validation officiels
 │   ├── core.js                  profil, parsing et validation métier facture
-│   ├── facturx.js               extraction du XML embarqué dans un PDF
+│   ├── facturx.js               extraction XML et précontrôle structurel PDF/A-3
 │   ├── standards.js             exécution EN 16931 et Peppol
 │   ├── metrics.js               agrégats d’activation locaux et export à liste blanche
 │   ├── netting.js               parsing CSV et moteur de compensation
@@ -522,6 +526,7 @@ Limites : corps HTTP de validation de 2 Mo, XML de 1 Mo, protection générale d
 - Une indisponibilité d'un validateur ne doit jamais être convertie en succès.
 - Une facture non reconnue ne doit pas être évaluée comme conforme.
 - Le score ne doit pas être présenté comme certification juridique.
+- Un précontrôle PDF/A-3 ne doit jamais être présenté comme une validation ISO 19005-3 exhaustive ; sa portée et l’orientation veraPDF doivent rester visibles.
 - Les versions EN 16931 et Peppol actives doivent être affichées et documentées.
 
 ### 8.2 Invariants confidentialité
@@ -560,11 +565,11 @@ Limites : corps HTTP de validation de 2 Mo, XML de 1 Mo, protection générale d
 
 ### 9.1 Position actuelle
 
-SettleMesh v0.9 fournit un précontrôle technique, des vérifications VIES/Peppol ponctuelles, des métriques pilote agrégées locales, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne certifie pas une entreprise, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
+SettleMesh v0.10 fournit un précontrôle technique incluant la structure hybride Factur-X/PDF/A-3, des vérifications VIES/Peppol ponctuelles, des métriques pilote agrégées locales, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne délivre pas de certification PDF/A, ne certifie pas une entreprise, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
 
 ### 9.2 Revue sécurité et RGPD interne
 
-La revue du 7 octobre 2026 est consignée dans `docs/SECURITY.md`. Elle couvre le frontend, le Worker, le stockage navigateur, les imports non fiables, les connecteurs externes, l'API locale, les dépendances, les actifs, frontières de confiance, menaces et portes de production. La version `0.8.0` a ajouté CSP, protections anti-frame/cross-origin, rejet des `DOCTYPE` et rétention de 30 jours ; la version `0.9.0` ajoute la minimisation et la non-persistance des vérifications VIES/Peppol, des délais et quotas explicites et trois états non ambigus. `npm audit` ne signale aucune vulnérabilité connue à la date de la revue.
+La revue du 7 octobre 2026 est consignée dans `docs/SECURITY.md`. Elle couvre le frontend, le Worker, le stockage navigateur, les imports non fiables, les connecteurs externes, l'API locale, les dépendances, les actifs, frontières de confiance, menaces et portes de production. La version `0.8.0` a ajouté CSP, protections anti-frame/cross-origin, rejet des `DOCTYPE` et rétention de 30 jours ; la version `0.9.0` ajoute la minimisation et la non-persistance des vérifications VIES/Peppol ; la version `0.10.0` inspecte localement les marqueurs PDF/A-3 et documente explicitement l’écart avec une validation ISO exhaustive. `npm audit` ne signale aucune vulnérabilité connue à la date de la revue.
 
 Cette revue est interne et préliminaire. Elle ne vaut ni pentest indépendant, ni analyse juridique, ni validation RGPD. Comptes, rôles, TLS de production, gestionnaire de secrets, révocation, quotas persistants, chiffrement au repos et procédure d'incident testée restent des prérequis avant des données réelles partagées.
 
@@ -668,7 +673,7 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 53 tests
+### 12.2 Couverture actuelle des 56 tests
 
 `test/core.test.js` — 13 tests :
 
@@ -694,11 +699,14 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - séparation des devises ;
 - neutralisation de l'injection de formule CSV.
 
-`test/standards.test.js` — 3 tests :
+`test/standards.test.js` — 6 tests :
 
 - exemple UBL conforme à EN 16931 et Peppol ;
 - détection d'un total TTC erroné ;
-- extraction et validation du CII embarqué dans un vrai PDF Factur-X.
+- extraction et validation du CII embarqué dans un vrai PDF Factur-X, avec précontrôle PDF/A-3 positif ;
+- rejet d’une déclaration PDF/A différente de la partie 3 ;
+- rejet d’une relation de fichier associé invalide ;
+- rejet d’un nom de XML différent de la propriété XMP Factur-X.
 
 `test/storage.test.js` — 4 tests :
 
@@ -752,6 +760,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - copier puis ouvrir le CheckLink dans un nouvel onglet ;
 - tester les deux factures de démonstration ;
 - importer un UBL, un CII et le PDF Factur-X de fixture ;
+- vérifier que le Factur-X affiche PDF/A-3B déclaré, le profil, le nom XML, la relation `/AF` et la limite « précontrôle » ;
 - traiter un lot mixte avec fichier invalide ;
 - exporter TXT, JSON et CSV ;
 - rechercher et filtrer l'historique ;
@@ -774,7 +783,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - [x] Créer une API de validation versionnée avec contrat OpenAPI, validation serveur et absence de persistance ; le déploiement reste lié à la gestion persistante des secrets, quotas et audits.
 - [x] Protéger l'API pilote avec clés Bearer hashées, organisation déterminée côté serveur, rotation et quotas en mémoire ; secrets et quotas persistants restent requis avant production.
 - [ ] Ajouter les contrôles nationaux du premier marché cible.
-- [ ] Vérifier la conformité PDF/A-3 de Factur-X, pas seulement le XML embarqué.
+- [ ] Vérifier exhaustivement la conformité PDF/A-3 de Factur-X ; le précontrôle structurel local XMP, profil et association XML est actif, mais une intégration veraPDF ou équivalente reste nécessaire pour clore ce point.
 - [x] Ajouter VIES et Peppol Directory avec états `vérifié`, `indisponible`, `non vérifié` distincts, requêtes explicites et aucune persistance côté SettleMesh.
 - [x] Instrumenter localement les métriques d'activation sans collecter le contenu ni les identifiants des factures ; toute télémétrie serveur reste soumise à consentement et analyse RGPD.
 - [x] Réaliser une revue sécurité/RGPD interne et un modèle de menace OWASP ; le pentest et les validations juridique/RGPD externes restent obligatoires avant production.
@@ -821,6 +830,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Les ERP construisent eux-mêmes le contrôle | Élevé | Être plus rapide sur les règles multi-pays et fournir une brique intégrable |
 | Le produit dépend trop du réseau | Élevé | CheckLink apporte une valeur autonome dès la première entreprise |
 | Faux sentiment de conformité | Critique | Sources/version visibles, avertissements et limites explicites |
+| Précontrôle PDF/A-3 interprété comme certification | Critique | Libellé « précontrôle local », contrôle de portée toujours présent et recommandation veraPDF ; aucune promesse ISO exhaustive |
 | Mauvaise compensation | Critique | Invariants testés, allocation facture, accord requis, aucune exécution automatique |
 | Créance cédée ou litigieuse incluse | Critique | Champs d'exclusion aujourd'hui ; vérification et preuves à construire |
 | Fuite de données de facturation | Critique | Traitement local, historique à liste blanche sur 30 jours, CSP et modèle de menace ; architecture serveur, chiffrement, droits et audit externe avant données réelles partagées |
@@ -851,6 +861,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-07 | Mesurer l’activation par agrégats locaux exportables | Donner aux pilotes et investisseurs des preuves d’usage sans transmettre le contenu des factures | Compteurs à liste blanche dans le navigateur ; aucune télémétrie réseau ni mesure des ouvertures externes sans consentement |
 | 2026-10-07 | Durcir le MVP après revue sécurité/RGPD interne | Réduire l'exposition locale et rendre les risques de production explicites sans promettre une conformité juridique | Historique compact sur 30 jours, diagnostic détaillé non persistant, CSP et anti-frame, modèle de menace documenté ; audit externe toujours requis |
 | 2026-10-07 | Activer VIES et Peppol Directory derrière un Worker minimal | Les APIs officielles ne sont pas appelables fiablement depuis une page statique à cause des politiques navigateur, mais la vérification doit fonctionner dans le produit publié | Identifiant minimal transmis au clic, aucun stockage, trois états distincts, quotas/délais explicites ; le contenu des factures reste local |
+| 2026-10-07 | Ajouter un précontrôle structurel PDF/A-3 dans le navigateur | Détecter les conteneurs Factur-X manifestement incohérents sans transmettre la facture ni prétendre reproduire un validateur ISO complet | XMP, nom du XML et association PDF deviennent des contrôles traçables ; veraPDF reste requis pour une validation exhaustive |
 
 ## 16. Questions ouvertes à trancher
 

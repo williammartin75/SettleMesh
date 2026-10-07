@@ -9,7 +9,7 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - configuration de l’entité destinataire, de son numéro de TVA et de son identifiant Peppol ;
 - sélection des formats, devises et références obligatoires ;
 - génération d’un CheckLink autonome et partageable ;
-- lecture locale des factures XML UBL/CII et extraction du XML embarqué dans les PDF Factur-X ;
+- lecture locale des factures XML UBL/CII, extraction du XML embarqué et précontrôle structurel PDF/A-3 des PDF Factur-X ;
 - exécution locale des règles officielles EN 16931 v1.3.16 pour UBL et CII ;
 - exécution locale des règles Peppol BIS Billing 3.0.21 pour les documents UBL Peppol ;
 - vérification à la demande d’un numéro de TVA auprès de VIES, avec résultat horodaté `vérifié`, `non vérifié` ou `indisponible` ;
@@ -58,6 +58,8 @@ Dans **Tester une facture**, utiliser :
 - **Exemple avec erreurs** pour observer la mauvaise entité, la TVA incorrecte, l’adresse de réception différente et l’absence de commande ;
 - **Exemple conforme** pour obtenir un résultat prêt à envoyer.
 
+Un PDF Factur-X déclenche en plus des contrôles locaux sur la déclaration PDF/A-3, le niveau déclaré, les propriétés XMP Factur-X, le nom du XML embarqué et son association au catalogue PDF. Le diagnostic contient toujours un contrôle de portée rappelant que cette inspection structurelle ne remplace pas une validation ISO 19005-3 complète avec veraPDF.
+
 Il est aussi possible de déposer jusqu’à 20 fichiers en une fois. Le tableau de synthèse ouvre ensuite le diagnostic détaillé de chaque facture et s’exporte en CSV.
 
 Dans **Mon CheckLink**, le profil peut être exporté en JSON puis réimporté dans un autre navigateur. Dans **Contrôles**, l’historique peut être recherché, filtré et exporté en CSV. Il est conservé uniquement dans le navigateur, pendant 30 jours et dans la limite de 100 résultats ; le diagnostic détaillé reste limité à la session courante.
@@ -80,4 +82,4 @@ Cette fonctionnalité est une simulation d’aide à la décision. Elle ne dépl
 
 ## Périmètre
 
-Les contrôles sont une aide à la préparation et ne constituent ni une certification juridique ni une garantie d’acceptation. Les artefacts EN 16931 et Peppol sont exécutés dans le navigateur, sans envoi de la facture à un serveur. VIES vérifie ponctuellement un statut TVA ; Peppol Directory indique une présence d’annuaire, pas la joignabilité SMP ni la capacité réelle à recevoir un document donné. Le MVP ne vérifie pas encore la conformité PDF/A-3 du conteneur Factur-X ni les règles nationales supplémentaires ; ces contrôles devront être ajoutés par des artefacts versionnés lors d’un pilote réel.
+Les contrôles sont une aide à la préparation et ne constituent ni une certification juridique ni une garantie d’acceptation. Les artefacts EN 16931 et Peppol sont exécutés dans le navigateur, sans envoi de la facture à un serveur. VIES vérifie ponctuellement un statut TVA ; Peppol Directory indique une présence d’annuaire, pas la joignabilité SMP ni la capacité réelle à recevoir un document donné. Pour Factur-X, le MVP détecte des incohérences structurelles PDF/A-3 visibles mais ne contrôle pas exhaustivement les polices, couleurs, profils ICC, actions et autres règles ISO 19005-3 : veraPDF ou un validateur équivalent reste nécessaire. Les règles nationales supplémentaires ne sont pas encore intégrées.

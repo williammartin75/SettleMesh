@@ -370,12 +370,16 @@ function applyNettingObligations(obligations, source) {
 
 function renderResult(result) {
   const summary = resultSummary(result);
+  const pdfa = result.invoice.containerPreflight;
+  const containerLabel = pdfa?.declaredPart === "3"
+    ? `PDF/A-3${pdfa.declaredConformance || ""} déclaré · précontrôle local`
+    : "Déclaration PDF/A-3 non confirmée";
   const area = $("#result-area");
   area.hidden = false;
   $("#result-summary").className = `result-summary ${result.outcome}`;
   $("#result-summary").innerHTML = `<div><span class="section-label">${escapeHtml(result.id)}</span><h3>${escapeHtml(summary.label)}</h3><p>${escapeHtml(summary.headline)}</p></div><div class="score-orb"><strong>${result.score}</strong><span>sur 100</span></div>`;
   $("#checks-list").innerHTML = result.checks.map((item) => `<article class="check-row ${item.status}"><span class="check-status">${item.status === "pass" ? "✓" : item.status === "error" ? "×" : item.status === "warning" ? "!" : "i"}</span><div><h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.message)}</p>${item.fix ? `<div class="fix"><strong>Comment corriger :</strong> ${escapeHtml(item.fix)}</div>` : ""}</div><span class="field-code">${escapeHtml(item.field)}</span></article>`).join("");
-  $("#result-side").innerHTML = `<span class="section-label">Document analysé</span><h3>${escapeHtml(result.invoice.invoiceNumber || "Sans numéro")}</h3><div class="result-fact"><span>Fournisseur</span><strong>${escapeHtml(result.invoice.supplierName || "Non lu")}</strong></div><div class="result-fact"><span>Destinataire</span><strong>${escapeHtml(result.invoice.buyerName || "Non lu")}</strong></div><div class="result-fact"><span>Format</span><strong>${escapeHtml(result.invoice.container === "FACTUR-X" ? "Factur-X · CII" : result.invoice.syntax)}</strong></div><div class="result-fact"><span>Norme</span><strong>EN 16931 ${escapeHtml(result.standards?.en16931 || "précontrôle")}</strong></div><div class="result-fact"><span>Montant</span><strong>${result.invoice.payableAmount != null ? `${result.invoice.payableAmount.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} ${escapeHtml(result.invoice.currency)}` : "Non lu"}</strong></div><button class="button primary full" type="button" id="download-report">Rapport lisible</button><button class="button secondary full" type="button" id="download-json-report">Rapport JSON</button><button class="button ghost full" type="button" id="new-check">Contrôler une autre facture</button><p class="disclaimer">Validation automatisée des artefacts indiqués, complétée par les exigences du destinataire. Ne constitue pas un avis juridique.</p>`;
+  $("#result-side").innerHTML = `<span class="section-label">Document analysé</span><h3>${escapeHtml(result.invoice.invoiceNumber || "Sans numéro")}</h3><div class="result-fact"><span>Fournisseur</span><strong>${escapeHtml(result.invoice.supplierName || "Non lu")}</strong></div><div class="result-fact"><span>Destinataire</span><strong>${escapeHtml(result.invoice.buyerName || "Non lu")}</strong></div><div class="result-fact"><span>Format</span><strong>${escapeHtml(result.invoice.container === "FACTUR-X" ? "Factur-X · CII" : result.invoice.syntax)}</strong></div>${result.invoice.container === "FACTUR-X" ? `<div class="result-fact"><span>Conteneur</span><strong>${escapeHtml(containerLabel)}</strong></div>` : ""}<div class="result-fact"><span>Norme</span><strong>EN 16931 ${escapeHtml(result.standards?.en16931 || "précontrôle")}</strong></div><div class="result-fact"><span>Montant</span><strong>${result.invoice.payableAmount != null ? `${result.invoice.payableAmount.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} ${escapeHtml(result.invoice.currency)}` : "Non lu"}</strong></div><button class="button primary full" type="button" id="download-report">Rapport lisible</button><button class="button secondary full" type="button" id="download-json-report">Rapport JSON</button><button class="button ghost full" type="button" id="new-check">Contrôler une autre facture</button><p class="disclaimer">Validation automatisée des artefacts indiqués, complétée par les exigences du destinataire. Le précontrôle PDF/A-3 ne remplace pas une validation ISO exhaustive. Ne constitue pas un avis juridique.</p>`;
   $("#download-report").addEventListener("click", () => download(`settlemesh-${result.invoice.invoiceNumber || result.id}.txt`, exportResultText(result)));
   $("#download-json-report").addEventListener("click", () => download(`settlemesh-${result.invoice.invoiceNumber || result.id}.json`, exportResultJson(result), "application/json;charset=utf-8"));
   $("#new-check").addEventListener("click", () => { area.hidden = true; $("#upload-panel").scrollIntoView({ behavior: "smooth" }); });
@@ -383,8 +387,10 @@ function renderResult(result) {
 }
 
 async function buildValidationResult(xmlText, source = {}, progressPrefix = "") {
-  const invoice = { ...parseInvoiceXml(xmlText), ...source };
+  const { containerChecks = [], ...invoiceSource } = source;
+  const invoice = { ...parseInvoiceXml(xmlText), ...invoiceSource };
   let result = validateInvoice(invoice, activeProfile());
+  if (containerChecks.length) result = appendValidationChecks(result, containerChecks, result.standards);
   setValidationProgress(true, `${progressPrefix}${invoice.syntax === "UBL" ? "Validation EN 16931 et Peppol…" : "Validation EN 16931…"}`);
   try {
     const official = await validateEuropeanStandard(xmlText, invoice);
@@ -435,7 +441,17 @@ async function readInvoiceFile(file) {
   const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
   if (isPdf) {
     const extracted = await extractFacturXXml(file);
-    return { xmlText: extracted.xmlText, source: { container: extracted.container, attachmentName: extracted.attachmentName, originalFileName: file.name } };
+    const { checks: _containerChecks, ...containerPreflight } = extracted.containerPreflight;
+    return {
+      xmlText: extracted.xmlText,
+      source: {
+        container: extracted.container,
+        attachmentName: extracted.attachmentName,
+        originalFileName: file.name,
+        containerPreflight,
+        containerChecks: extracted.containerChecks
+      }
+    };
   }
   if (!/\.(xml|ubl|cii)$/i.test(file.name) && !/xml/i.test(file.type)) throw new Error("Format non pris en charge. Utilisez XML UBL/CII ou PDF Factur-X.");
   return { xmlText: await file.text(), source: { container: "XML", originalFileName: file.name } };
