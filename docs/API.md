@@ -58,6 +58,33 @@ alter table public.settlemesh_registry enable row level security;
 
 Avec RLS activée sans policy, seules les requêtes authentifiées par le `service_role` peuvent lire et écrire. La lecture est mise en cache 5 secondes et `GET /api/v1/health` expose `authentication.registry` et `authentication.supabase`. Migrer ensuite un registre local : `npm run registry:push -- chemin\vers\settlemesh-registry.json` (mise à priorité fichier local > Supabase > `SETTLEMESH_API_KEYS`). La révocation reste appliquée sans redémarrage.
 
+### Membres et sessions humaines (0.17.0, étape 2b-1)
+
+Les comptes humains exigent le stockage managé. Tables à créer dans **SQL Editor** :
+
+```sql
+create table if not exists public.settlemesh_members(
+  id uuid primary key default gen_random_uuid(),
+  organization_id text not null,
+  email text not null unique,
+  password_hash text not null,
+  role text not null check (role in ('owner','admin','viewer')),
+  created_at timestamptz not null default now()
+);
+create table if not exists public.settlemesh_sessions(
+  id uuid primary key,
+  member_id uuid not null references public.settlemesh_members(id) on delete cascade,
+  organization_id text not null,
+  role text not null,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+alter table public.settlemesh_members enable row level security;
+alter table public.settlemesh_sessions enable row level security;
+```
+
+Créer un membre : `npm run member:add -- <organizationId> <email> [owner|admin|viewer]` (mot de passe fort généré, affiché une seule fois, jamais stocké en clair ; haché scrypt). Le serveur définit alors `POST /api/v1/auth/login`, `POST /api/v1/auth/logout` et `GET /api/v1/auth/me` avec un cookie `settlemesh_session` `HttpOnly`/`SameSite=Lax` de 24 h (ajoutez `Secure` via `SETTLEMESH_COOKIE_SECURE=1` derrière TLS). MFA propriétaire : étape suivante.
+
 ## Administration des clés (0.16.0)
 
 `/api/v1/admin/*` exige l'authentification Bearer et un registre persistant. La matrice de rôles est appliquée serveur :

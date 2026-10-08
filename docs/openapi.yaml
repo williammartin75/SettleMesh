@@ -68,6 +68,69 @@ paths:
           $ref: '#/components/responses/ApiError'
         '503':
           $ref: '#/components/responses/ApiError'
+  /auth/login:
+    post:
+      operationId: loginMember
+      summary: Connecter un membre humain (cookie de session durci)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Session créée ; cookie settlemesh_session HttpOnly/SameSite=Lax, 24 h
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '401':
+          description: Identifiants invalides (réponse générique)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stockage des membres indisponible ou non configuré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ApiError'
+  /auth/logout:
+    post:
+      operationId: logoutMember
+      summary: Terminer la session courante (cookie)
+      responses:
+        '200':
+          description: Session supprimée côté serveur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '401':
+          $ref: '#/components/responses/ApiError'
+  /auth/me:
+    get:
+      operationId: currentMember
+      summary: Session courante (membre, organisation, rôle, expiration)
+      responses:
+        '200':
+          description: Session valide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '401':
+          description: Session inconnue ou expirée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /admin/keys:
     get:
       operationId: listAdminKeys
@@ -271,7 +334,7 @@ components:
             peppol: { type: string }
         authentication:
           type: object
-          required: [validate, identity, configured, registry, supabase]
+          required: [validate, identity, configured, registry, supabase, members]
           properties:
             validate: { const: bearer-api-key }
             identity: { const: same-origin }
@@ -282,6 +345,9 @@ components:
             supabase:
               type: boolean
               description: true quand les clés sont chargées depuis la table public.settlemesh_registry d'un projet Supabase (SETTLEMESH_SUPABASE_*), lecture mise en cache 5 s.
+            members:
+              type: boolean
+              description: true quand le stockage des membres humains est actif (tables Supabase settlemesh_members / settlemesh_sessions).
         limits:
           type: object
           properties:
@@ -427,6 +493,28 @@ components:
         message: { type: string }
         fix: { type: string }
         field: { type: string }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 256 }
+    SessionResponse:
+      type: object
+      required: [schema, apiVersion, requestId]
+      properties:
+        schema: { const: settlemesh-session }
+        apiVersion: { const: v1 }
+        requestId: { type: string, format: uuid }
+        organizationId: { type: string }
+        member:
+          type: object
+          properties:
+            email: { type: string }
+            role: { enum: [owner, admin, viewer] }
+        expiresAt: { type: string, format: date-time }
+        terminated: { type: boolean }
     AdminKeysResponse:
       type: object
       required: [schema, apiVersion, requestId, organizationId, keys]

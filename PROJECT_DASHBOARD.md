@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.16.0` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production (sessions humaines et MFA en étape suivante) |
+| Version du code | `0.17.0` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h et cookies durcis, métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production (MFA et interface navigateur de gestion en étape suivante) |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 111 tests au 8 octobre 2026 |
+| Tests automatisés | 116 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -153,8 +153,9 @@ Légende :
 | Netting | Scénario de cut-off daté | Opérationnel | Simulation locale uniquement ; les obligations postérieures au cut-off ou sans échéance exploitable sont différées et comptées séparément, jamais supprimées ni requalifiées |
 | Netting | Positions nettes et paiements résiduels | Opérationnel | Aucun ordre de paiement n'est émis |
 | Netting | Export des propositions et allocations | Opérationnel | Document de travail, pas un accord signé |
-| Identité | Registre d'organisations persistant (hashes, rôles, révocation, quotas) | Partiel | Fichier local ou stockage managé Supabase (`SETTLEMESH_SUPABASE_*`), relus sans redémarrage, clés uniquement hashées ; rôles Résolus et renvoyés, API d'administration de clés appliquant la matrice owner/admin/viewer (0.16.0) ; aucun compte humain, session ni interface d'administration navigateur ; revue RGPD externe requise pour des données réelles |
-| Identité | Comptes, organisations multi-utilisateurs, rôles | Prévu | Nécessite stockage d'identité, sessions, invitations et droits persistants |
+| Identité | Registre d'organisations persistant (hashes, rôles, révocation, quotas) | Partiel | Fichier local ou stockage managé Supabase (`SETTLEMESH_SUPABASE_*`), relus sans redémarrage, clés uniquement hashées ; rôles résolus et renvoyés, API d'administration de clés appliquant la matrice owner/admin/viewer (0.16.0) ; revue RGPD externe requise pour des données réelles |
+| Identité | Membres humains, login/logout, sessions et cookies durcis | Partiel | Stockage managé uniquement (e-mail + mot de passe scrypt, sessions 24 h en table, cookie `HttpOnly`/`SameSite=Lax`, badge `members`) ; pas de MFA propriétaire, pas d'interface navigateur de gestion, pas de mot de passe de réinitialisation, revue RGPD externe requise pour des données personnelles réelles (e-mail salarié) |
+| Identité | Comptes, organisations multi-utilisateurs, rôles | Partiel | Comptes humains par e-mail et rôle disponibles en 0.17.0 ; multi-organisation, invitations, changement/oubli de mot de passe et interface de gestion restent à construire |
 | Réseau | Invitations et contreparties vérifiées | Prévu | Condition du vrai effet réseau |
 | Connecteurs | VIES | Opérationnel | Requête explicite sans stockage ; réponse ponctuelle, disponibilité amont et portée juridique limitées |
 | Connecteurs | Peppol Directory | Opérationnel | Recherche exacte limitée à 2/s ; présence d’annuaire distincte de la joignabilité SMP |
@@ -695,7 +696,15 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 111 tests
+### 12.2 Couverture actuelle des 116 tests
+
+`test/members-sessions.test.js` — 5 tests :
+
+- scrypt : hachage non réversible, vérification positive/négative, format contrôlé ;
+- adaptateur : normalisation d'e-mail, création de membre et de session via PostgREST simulé ;
+- session périmée → `401 SESSION_EXPIRED` ; aucune session → `401 AUTH_REQUIRED` ;
+- login complet : mauvais mot de passe → `401 INVALID_CREDENTIALS` sans cookie, bon mot de passe → cookie `HttpOnly`/`SameSite=Lax`, `/me`, puis logout efface la session côté serveur ;
+- sans stockage membres → `409 MEMBERS_UNAVAILABLE`.
 
 `test/registry-admin.test.js` — 3 tests (ports éphémères, isolation par fichiers) :
 
@@ -873,7 +882,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 ### P0 — rendre le pilote crédible
 
 - [x] Adopter SettleMesh comme marque mère, SettleMesh CheckLink comme module de conformité et SettleMesh Net comme module de compensation, avec migration rétrocompatible des données Eurule.
-- [ ] Ajouter comptes, sessions et organisations multi-utilisateurs avec membres et rôles ; l'API possède déjà une authentification technique par clé d'organisation. Décision du 8 octobre 2026 : registre d'organisations persisté en deux étapes (« option C échelonné ») — v0.14-0.15 : organisations, rôles, révocation et quotas persistés (fichier `settlemesh-registry-1` relu à chaud, puis plateforme Supabase branchée via PostgREST en fetch natif, cycle réel pousser→valider→révoquer→401 vérifié) ; étape suivante : sessions humaines durcies, cookies durcis et MFA propriétaire. Aucun contenu de facture ne transite vers ce registre. Si des données personnelles du périmètre de l'Europe sont traitées, les obligations RGPD (transferts internationaux, SCC, DPA) s'appliquent indépendamment du lieu d'hébergement et restent documentées par la revue externe.
+- [ ] Ajouter comptes, sessions et organisations multi-utilisateurs avec membres et rôles ; l'API possède déjà une authentification technique par clé d'organisation. Décision du 8 octobre 2026 : registre d'organisations persisté en deux étapes (« option C échelonné ») — v0.14-0.15 : organisations, rôles, révocation et quotas persistés (fichier `settlemesh-registry-1` relu à chaud, puis plateforme Supabase branchée via PostgREST en fetch natif, cycle réel pousser→valider→révoquer→401 vérifié) ; v0.16-0.17 (étapes 2a et 2b-1) : API d'administration des clés avec matrice appliquée, puis comptes humains e-mail + mot de passe scrypt et sessions serveur de 24 h avec cookies durcis ; étape 2b-2 : MFA propriétaire ; étape 2b-3 : interface navigateur de gestion. Aucun contenu de facture ne transite vers ce registre. Si des données personnelles du périmètre de l'Europe sont traitées, les obligations RGPD (transferts internationaux, SCC, DPA) s'appliquent indépendamment du lieu d'hébergement et restent documentées par la revue externe.
 - [ ] Stocker profils et journaux côté serveur avec chiffrement, rétention et droits d'accès ; distinct du registre d'organisations (clés, rôles, révocation, quotas) qui est persisté localement depuis 0.14.0 puis sur base managée Supabase depuis 0.15.0 — aucun profil ni journal de facturation ne transite par le registre ; l'onboarding veraPDF et le chiffrement au repos productif restent requis.
 - [x] Créer une API de validation versionnée avec contrat OpenAPI, validation serveur et absence de persistance ; le déploiement reste lié à la gestion persistante des secrets, quotas et audits.
 - [x] Protéger l'API pilote avec clés Bearer hashées, organisation déterminée côté serveur et rotation ; depuis 0.14.0 révocation et quotas persistés via le registre local, et depuis 0.16.0 l'API d'administration applique la matrice de rôles (owner/admin/viewer, isolation testée) ; gestionnaire de secrets et pentest externes restent requis avant production.
@@ -964,6 +973,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-08 | Rendre le registre d'organisations persistant localement avant l'adaptateur plateforme managée | Fermer les portes production « révocation et quotas persistants » avec les moyens disponibles, tout en préparant la migration Supabase sans changer le contrat | Fichier `settlemesh-registry-1` : hashes SHA-256 uniquement, rôles owner/admin/viewer, revokedAt, quotas ; relecture à chaud (mtime), CLI `npm run registry:key` à écriture atomique, rôle renvoyé dans la réponse de validation ; comptes humains, sessions et MFA restent en étape 2, pentest et revue RGPD externes toujours requis |
 | 2026-10-08 | Brancher le registre sur la plateforme managée Supabase via PostgREST en fetch natif | Fermer la porte « adaptateur plateforme managée » sans dépendance nouvelle ni changement de contrat ; clé service_role limitée à un projet plutôt qu'un token compte-entier | Table `public.settlemesh_registry` durcie par RLS (aucune policy : seul le service_role lit/écrit), lecture en cache 5 s, `npm run registry:push` à upsert atomique, priorité fichier local > Supabase > mémoire, `.balise supabase` dans /health ; cycle réel pousser→valider→révoquer→401 vérifié sans redémarrage ; vérification RGPD externe et pentest toujours requis, RLS peut gagner par la suite des policies par organisation |
 | 2026-10-08 | Ajouter l'API d'administration des clés avec application de la matrice de rôles (étape 2a) | Donner un usage réel aux rôles owner/admin/viewer (ils n'étaient qu'informables) tout en gardant les sessions humaines et le MFA pour une étape ultérieure | `GET/POST/PATCH/DELETE /api/v1/admin/*` avec isolation par organisation testée, écriture du document complet revalidée par le registre, révocation immédiatement effective sur la source active, `409 ADMIN_REQUIRES_REGISTRY` sans registre persistant ; un admin ne peut jamais créer ni promouvoir vers owner ; l'UI navigateur de gestion n'existe pas encore |
+| 2026-10-08 | Ajouter membres humains et sessions durcies (étape 2b-1) sans MFA | Ouvrir la voie à l'interface de gestion tout en bornant l'exposition : e-mail + mot de passe haché scrypt, sessions 24 h côté serveur, cookie `HttpOnly`/`SameSite=Lax` ; toute indisponibilité du stockage reste `503` et jamais maquillée en mauvais identifiants | `POST /api/v1/auth/login`, `/logout`, `GET /me` ; tables `public.settlemesh_members` et `public.settlemesh_sessions` (RLS sans policy), MFA propriétaire en 2b-2 et interface navigateur de gestion en 2b-3 ; aucun mot de passe enterré, aucun secret du stockage dans le dépôt ; revue RGPD externe requise avant données personnelles réelles |
 
 ## 16. Questions ouvertes à trancher
 

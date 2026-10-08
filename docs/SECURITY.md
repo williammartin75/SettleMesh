@@ -49,6 +49,8 @@ Actifs à protéger : contenu des factures, identifiants fiscaux, noms de partie
 | Hash de clé API | Variable de configuration serveur | Durée du processus | Non |
 | Hashes, rôles, quotas et révocations des clés API (registre persistant 0.14.0) | Fichier local `settlemesh-registry-1` désigné par `SETTLEMESH_REGISTRY_FILE` | Jusqu'à suppression du fichier ; relu à chaud, jamais de clé brute | Non |
 | Hashes, rôles, quotas et révocations des clés API (registre managé 0.15.0) | Table `public.settlemesh_registry` d'un projet Supabase, via PostgREST et clé `service_role` en variable d'environnement | Durée du projet ; relue avec cache de 5 s, RLS sans policy : service_role seul lecteur-écrivain, jamais de clé brute | Vers la source officielle Supabase au moment de la requête |
+| Membres humains (0.17.0) : e-mail + hachage scrypt | Table `public.settlemesh_members` du même projet, service_role en variable d'environnement | Jusqu'à suppression du membre ; aucune donnée de facturation ; mot de passe jamais en clair | Non |
+| Sessions humaines 24 h (0.17.0) | Table `public.settlemesh_sessions` (identifiant aléatoire, expiration côté serveur), cookie `HttpOnly`/`SameSite=Lax` | 24 h puis suppression manuelle ou expiration ; purge à l'expiration lors de la lecture suivante | Non |
 
 L'historique persistant ne contient ni XML brut, ni acheteur, ni endpoint, ni référence de commande, ni détail des contrôles. Le dernier diagnostic complet n'est plus écrit dans `localStorage` à partir de la version `0.8.0`.
 
@@ -81,7 +83,7 @@ L'historique persistant ne contient ni XML brut, ni acheteur, ni endpoint, ni r�
 | WSTG-INPV-07 | Faible, corrigé `0.8.0` | rejet `DOCTYPE` harmonisé entre navigateur et API | conserver le test à chaque nouveau format XML |
 | WSTG-ATHN-01 | Élevé, ouvert | aucune identité humaine, session ou rôle | acceptable pour le MVP local ; obligatoire avant données partagées côté serveur |
 | WSTG-ATHZ-01 | Élevé, en partie corrigé `0.16.0` | matrice de rôles owner/admin/viewer appliquée par l'API d'administration des clés, isolation des organisations testée ; aucun objet de facturation accessible par cette API | sessions humaines, membres et rattachement utilisateur-clé restent à concevoir |
-| WSTG-SESS-01 | Élevé, ouvert | aucune gestion de session applicative | choisir un fournisseur d'identité, cookies `Secure`/`HttpOnly`/`SameSite` et rotation avant production |
+| WSTG-SESS-01 | Élevé, en partie corrigé `0.17.0` | sessions serveur de 24 h dans une table durcie, cookie `settlemesh_session` `HttpOnly`/`SameSite=Lax`, tentative de mot de passe scrypt avec sel, réponse générique `INVALID_CREDENTIALS` | MFA propriétaire, rotation/invalidation globale des sessions, Secure flag derrière TLS et revue externe avant exposition |
 | WSTG-CRYP-01 | Élevé, ouvert | TLS non terminé par l'API locale | exiger TLS 1.2+ au proxy, gestionnaire de secrets et chiffrement au repos en production |
 | WSTG-BUSL-01 | Critique, maîtrisé dans le MVP | la simulation Net pourrait être prise pour une exécution | aucune extinction, aucun ordre et aucun fonds ; accord humain et analyse juridique restent obligatoires |
 | WSTG-ERRH-01 | Faible, satisfaisant | réponses structurées sans contenu de facture ; logs serveur minimisés | ajouter corrélation et procédure d'incident sans données sensibles |

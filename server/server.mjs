@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { authenticateApiKey, parseApiKeyConfiguration } from "./auth.mjs";
 import { createFileRegistry, writeRegistryFile } from "./registry.mjs";
 import { createSupabaseRegistry } from "./registry-supabase.mjs";
+import { createSupabaseMembers, verifyPassword } from "./members.mjs";
 import { handleAdminRequest } from "./admin.mjs";
 import { validateApiInvoice } from "./validation.mjs";
 import { IdentityInputError, verifyPeppol, verifyVies } from "../worker/identity.mjs";
@@ -88,6 +89,8 @@ export function createSettleMeshServer({
   rateLimit = 120,
   apiKeys = parseApiKeyConfiguration(),
   registryFile = process.env.SETTLEMESH_REGISTRY_FILE || "",
+  membersStoreOption = null,
+  cookieSecure = String(process.env.SETTLEMESH_COOKIE_SECURE || "") === "1",
   identityFetch = fetch
 } = {}) {
   const normalizedRoot = resolve(root);
@@ -96,6 +99,12 @@ export function createSettleMeshServer({
   const supabaseRegistry = !registry && process.env.SETTLEMESH_SUPABASE_SERVICE_KEY && process.env.SETTLEMESH_SUPABASE_PROJECT_REF
     ? createSupabaseRegistry({ projectRef: process.env.SETTLEMESH_SUPABASE_PROJECT_REF, serviceKey: process.env.SETTLEMESH_SUPABASE_SERVICE_KEY })
     : null;
+  const membersStore = membersStoreOption || (supabaseRegistry
+    ? createSupabaseMembers({
+      projectRef: process.env.SETTLEMESH_SUPABASE_PROJECT_REF,
+      serviceKey: process.env.SETTLEMESH_SUPABASE_SERVICE_KEY
+    })
+    : null);
   const credentialsSource = async () => {
     if (registry) return registry.credentials();
     if (supabaseRegistry) {
@@ -146,7 +155,7 @@ export function createSettleMeshServer({
         return jsonResponse(response, 200, {
           schema: "settlemesh-api-health", apiVersion: API_VERSION, status: "ok",
           validators: { en16931: "1.3.16", peppol: "3.0.21" },
-          authentication: { validate: "bearer-api-key", identity: "same-origin", configured: (await credentialsSource()).length > 0, registry: Boolean(registry), supabase: Boolean(supabaseRegistry) },
+          authentication: { validate: "bearer-api-key", identity: "same-origin", configured: (await credentialsSource()).length > 0, registry: Boolean(registry), supabase: Boolean(supabaseRegistry), members: Boolean(membersStore) },
           identitySources: { vies: "live", peppolDirectory: "live", persistence: false },
           limits: { requestBytes: MAX_API_BODY_BYTES, xmlBytes: 1024 * 1024, ipRequestsPerMinute: rateLimit },
           persistence: false
@@ -180,6 +189,74 @@ export function createSettleMeshServer({
           const failure = apiError(requestId, error.code || "IDENTITY_CHECK_FAILED", status >= 500 ? "La vérification a échoué." : error.message, status);
           return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
         }
+      }
+
+      if (url.pathname.startsWith("/api/v1/auth/")) {
+        if (!membersStore) {
+          const failure = apiError(requestId, "MEMBERS_UNAVAILABLE", "Les sessions humaines exigent le stockage managé (SETTLEMESH_SUPABASE_*).", 409);
+          return jsonResponse(response, 409, failure.body, ipRateHeaders);
+        }
+        const sessionCookie = (request.headers.cookie || "").match(/(?:^|;\s*)settlemesh_session=([0-9a-f-]{36})/i)?.[1] || "";
+        const cookieOptions = `Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${cookieSecure ? "; Secure" : ""}`;
+
+        if (url.pathname === "/api/v1/auth/login" && request.method === "POST") {
+          try {
+            const payload = await readJson(request);
+            const member = await membersStore.findMemberByEmail(payload?.email);
+            const passwordOk = member && verifyPassword(payload?.password || "", member.password_hash);
+            if (!passwordOk) {
+              const failure = apiError(requestId, "INVALID_CREDENTIALS", "Identifiants invalables.", 401);
+              return jsonResponse(response, 401, failure.body, ipRateHeaders);
+            }
+            const session = await membersStore.createSession({ memberId: member.id, organizationId: member.organization_id, role: member.role });
+            return jsonResponse(response, 200, {
+              schema: "settlemesh-session", apiVersion: API_VERSION, requestId,
+              organizationId: session.organizationId,
+              member: { email: member.email, role: member.role },
+              expiresAt: session.expiresAt
+            }, { ...ipRateHeaders, "Set-Cookie": `settlemesh_session=${session.sessionId}; ${cookieOptions}` });
+          } catch (error) {
+            if (error?.code === "MEMBERS_UNAVAILABLE") {
+              const failure = apiError(requestId, error.code, error.message, 503);
+              return jsonResponse(response, 503, failure.body, ipRateHeaders);
+            }
+            const failure = apiError(requestId, error.code || "INVALID_CREDENTIALS", error.statusCode && error.statusCode < 500 ? error.message : "Identifiants non analysables.", 400);
+            return jsonResponse(response, 400, failure.body, ipRateHeaders);
+          }
+        }
+
+        if (!sessionCookie) {
+          const failure = apiError(requestId, "AUTH_REQUIRED", "Aucune session SettleMesh (cookie) pour cette requête.", 401);
+          return jsonResponse(response, 401, failure.body, ipRateHeaders);
+        }
+
+        if (url.pathname === "/api/v1/auth/logout" && request.method === "POST") {
+          await membersStore.deleteSession(sessionCookie);
+          return jsonResponse(response, 200, { schema: "settlemesh-session", apiVersion: API_VERSION, requestId, terminated: true },
+            { ...ipRateHeaders, "Set-Cookie": `settlemesh_session=; ${cookieOptions}` });
+        }
+
+        if (url.pathname === "/api/v1/auth/me" && request.method === "GET") {
+          try {
+            const session = await membersStore.findSession(sessionCookie);
+            if (!session) {
+              const failure = apiError(requestId, "SESSION_EXPIRED", "Session inconnue ou expirée.", 401);
+              return jsonResponse(response, 401, failure.body, ipRateHeaders);
+            }
+            return jsonResponse(response, 200, {
+              schema: "settlemesh-session", apiVersion: API_VERSION, requestId,
+              organizationId: session.organization_id,
+              member: { role: session.role },
+              expiresAt: session.expires_at
+            }, ipRateHeaders);
+          } catch (error) {
+            const failure = apiError(requestId, error?.code || "MEMBERS_UNAVAILABLE", error?.message || "Le stockage des membres est momentanément indisponible.", 503);
+            return jsonResponse(response, 503, failure.body, ipRateHeaders);
+          }
+        }
+
+        const errorNoRoute = apiError(requestId, "METHOD_NOT_ALLOWED", "Utilisez POST /auth/login, POST /auth/logout ou GET /auth/me.", 405);
+        return jsonResponse(response, 405, errorNoRoute.body, { ...ipRateHeaders, Allow: "POST, GET" });
       }
 
       if (url.pathname.startsWith("/api/v1/admin/") || url.pathname === "/api/v1/admin") {
