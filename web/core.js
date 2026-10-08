@@ -70,7 +70,9 @@ export function encodeProfile(profile) {
     p: profile.peppolId, r: profile.routingProvider, f: profile.acceptedFormats,
     u: profile.acceptedCurrencies, po: Boolean(profile.requirePurchaseOrder),
     br: Boolean(profile.requireBuyerReference), ep: Boolean(profile.requireEndpoint),
-    at: Boolean(profile.requireAttachment), e: profile.submissionEmail, i: profile.instructions
+    at: Boolean(profile.requireAttachment), e: profile.submissionEmail, i: profile.instructions,
+    // consentement de mesure d'activation : absent = aucun signalement
+    ...(profile.usageMetricsConsent === true ? { mc: true } : {})
   };
   const bytes = textEncoder.encode(JSON.stringify(compact));
   let binary = "";
@@ -91,7 +93,8 @@ export function decodeProfile(value) {
       acceptedCurrencies: Array.isArray(data.u) ? data.u : ["EUR"],
       requirePurchaseOrder: Boolean(data.po), requireBuyerReference: Boolean(data.br),
       requireEndpoint: Boolean(data.ep), requireAttachment: Boolean(data.at),
-      submissionEmail: data.e || "", instructions: data.i || ""
+      submissionEmail: data.e || "", instructions: data.i || "",
+      usageMetricsConsent: Boolean(data.mc)
     };
   } catch {
     return null;
@@ -146,7 +149,8 @@ export function parseProfileBundle(value) {
     requireEndpoint: source.requireEndpoint === true,
     requireAttachment: source.requireAttachment === true,
     submissionEmail: String(source.submissionEmail || "").trim(),
-    instructions: String(source.instructions || "").trim()
+    instructions: String(source.instructions || "").trim(),
+    usageMetricsConsent: source.usageMetricsConsent === true
   };
 }
 

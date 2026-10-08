@@ -28,7 +28,7 @@ test("le succès réinitialise les échecs de ce couple ip/e-mail uniquement", (
   tracker.attempt(beta); tracker.attempt(beta);
   assert.ok(!tracker.blocked(beta));
   tracker.attempt(beta); tracker.attempt(beta);
- 	assert.ok(tracker.blocked(beta));
+  assert.ok(tracker.blocked(beta));
   assert.ok(!tracker.blocked(alpha), "le compte d'alpha n'est pas pollué par les échecs de beta");
 });
 

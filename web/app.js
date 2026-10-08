@@ -26,6 +26,7 @@ import {
 } from "./metrics.js";
 import { createNettingDemo, exportNettingCsv, nettingCsvTemplate, parseNettingCsv, simulateNetting } from "./netting.js";
 import { publishRequirements, searchRequirements, unpublishRequirements, verifyRequirements } from "./requirements.js";
+import { reportEvent } from "./reporting.js";
 import { activePacks } from "./rules/index.mjs";
 import { validateEuropeanStandard } from "./standards.js";
 import { compactHistory, createPersistedState, readPersistedState, writePersistedState } from "./storage.js";
@@ -144,6 +145,8 @@ async function copyCheckLink() {
   state.metrics = recordMetricAction(state.metrics, "checklink-copy");
   persist();
   renderDashboard();
+  // Signalement consenti : ne part que si le profil porte usageMetricsConsent.
+  reportEvent(state.profile, "checklink_copied").catch(() => {});
   toast("CheckLink copié", "Vous pouvez maintenant l’envoyer à un fournisseur.");
 }
 
@@ -301,6 +304,7 @@ function fillProfileForm() {
   form.elements.acceptedCurrencies.value = (profile.acceptedCurrencies || []).join(", ");
   $$('input[name="formats"]', form).forEach((input) => { input.checked = profile.acceptedFormats?.includes(input.value); });
   ["requirePurchaseOrder", "requireBuyerReference", "requireEndpoint", "requireAttachment"].forEach((name) => { form.elements[name].checked = Boolean(profile[name]); });
+  form.elements.usageMetricsConsent.checked = profile.usageMetricsConsent === true;
 }
 
 function profileFromForm(form) {
@@ -313,6 +317,7 @@ function profileFromForm(form) {
     acceptedCurrencies: String(data.get("acceptedCurrencies") || "EUR").split(",").map((item) => item.trim().toUpperCase()).filter(Boolean),
     requirePurchaseOrder: data.has("requirePurchaseOrder"), requireBuyerReference: data.has("requireBuyerReference"),
     requireEndpoint: data.has("requireEndpoint"), requireAttachment: data.has("requireAttachment"),
+    usageMetricsConsent: data.has("usageMetricsConsent"),
     submissionEmail: String(data.get("submissionEmail") || "").trim(), instructions: String(data.get("instructions") || "").trim()
   };
 }
@@ -463,6 +468,13 @@ function saveResults(results) {
   persist();
   renderDashboard();
   renderHistory();
+  // Signalement consenti, un événement par facture contrôlée : le profil
+  // effectif est celui du lien CheckLink (fournisseur) ou le profil local.
+  const profile = publicProfile || state.profile;
+  for (const result of results) {
+    reportEvent(profile, "invoice_checked").catch(() => {});
+    if (result.outcome === "ready") reportEvent(profile, "invoice_ready").catch(() => {});
+  }
 }
 
 async function analyze(xmlText, source = {}) {

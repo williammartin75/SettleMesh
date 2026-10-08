@@ -37,7 +37,7 @@ export function sanitizeRequirementProfile(profile) {
     }
   }
   if (!clean.companyName && !clean.legalName) {
-    throw Object.assign(new Error("Un profil publiée doit porter un nom d'entreprise."), { code: "INVALID_REQUIREMENTS_PAYLOAD", status: 400 });
+    throw Object.assign(new Error("Un profil publié doit porter un nom d'entreprise."), { code: "INVALID_REQUIREMENTS_PAYLOAD", status: 400 });
   }
   return clean;
 }
@@ -130,6 +130,10 @@ export function createSupabaseRequirements({ projectRef, serviceKey, fetchImpl =
   return {
     async upsert({ organizationId, profile, published }) {
       const clean = sanitizeRequirementProfile(profile);
+      // incrément de version à chaque écriture : la version publiée est
+      // réversible et observable par le fournisseur (verify, mise en cache)
+      const existing = await this.findByOrganization(organizationId);
+      const version = (Number(existing?.version) || 0) + 1;
       const body = {
         organization_id: organizationId,
         company_name: clean.companyName || clean.legalName,
@@ -149,6 +153,7 @@ export function createSupabaseRequirements({ projectRef, serviceKey, fetchImpl =
           instructions: clean.instructions || ""
         },
         published: Boolean(published),
+        version,
         updated_at: new Date().toISOString()
       };
       const response = await request("/settlemesh_requirements?on_conflict=organization_id", {
@@ -188,7 +193,9 @@ export function createSupabaseRequirements({ projectRef, serviceKey, fetchImpl =
     async search(query) {
       const q = cleanText(query);
       if (!q) throw Object.assign(new Error("Une recherche exige un mot-clé (raison sociale, TVA ou identifiant Peppol)."), { code: "INVALID_REQUIREMENTS_QUERY", status: 400 });
-      const vat = cleanUpper(q).startsWith("FR") ? cleanUpper(q) : "";
+      // toute forme nettoyée de numéro intracommunautaire (2 lettres + au moins 5 signes) est traitée comme une TVA
+      const cleaned = cleanUpper(q);
+      const vat = /^[A-Z]{2}[0-9A-Z]{5,}$/.test(cleaned) ? cleaned : "";
       const conditions = [
         `company_name.ilike.${encodeURIComponent(`*${q}*`)}`,
         vat ? `vat_id.eq.${vat}` : null,

@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.21.0` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h, cookies durcis et MFA propriétaire TOTP sans dépendance, registre public d'exigences de réception (recherche et vérification de CheckLink sans compte) **et première interface navigateur** (recherche, publication opt-in, bouton de vérification fournisseur), métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.22.0` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h, cookies durcis et MFA propriétaire TOTP sans dépendance, registre public d'exigences de réception (recherche et vérification de CheckLink sans compte) **et première interface navigateur** (recherche, publication opt-in, bouton de vérification fournisseur), métriques pilote locales **et télémétrie d'activation consentie, minimisée et anonyme** (`/api/v1/metrics`, consentement explicite porté par le profil CheckLink), connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 135 tests au 8 octobre 2026 |
+| Tests automatisés | 147 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -143,7 +143,7 @@ Légende :
 | Lots | Jusqu'à 20 fichiers, 20 Mo chacun | Opérationnel | Traitement séquentiel dans le navigateur |
 | Rapports | TXT, JSON et CSV | Opérationnel | Pas de signature ni piste d'audit serveur |
 | Historique | Recherche, filtre, export et suppression locale | Opérationnel | Champs minimisés, 100 résultats et 30 jours maximum dans le navigateur ; diagnostic détaillé limité à la session |
-| Mesure pilote | Compteurs d’activation agrégés, export JSON et remise à zéro | Opérationnel | Stockage local uniquement ; aucune ouverture externe ou correction inter-session mesurable sans télémétrie consentie |
+| Mesure pilote | Compteurs d’activation agrégés, export JSON et remise à zéro | Opérationnel | Stockage local ; **télémétrie serveur consentie, minimisée et anonyme depuis 0.22.0** (`/api/v1/metrics`, consentement explicite porté par le profil, ligne organisation/jour/action/quantité 1) ; aucune ouverture externe des compteurs locaux ni correction inter-session sans consentement |
 | Intégration | API de validation `/api/v1` | Partiel | Endpoint local authentifié par clé d'organisation ; secrets, quotas et audit persistants ainsi que déploiement de production absents |
 | Netting | Import CSV d'obligations | Opérationnel | 2 Mo et 500 obligations conservées localement |
 | Netting | Compensation bilatérale | Opérationnel | Simulation seulement, accord requis |
@@ -567,6 +567,7 @@ Depuis la version 0.17.0, des comptes humains existent : `POST /api/v1/auth/logi
 - Une clé API brute ne doit jamais être enregistrée dans le dépôt, le CheckLink, les logs ou une réponse ; seul son hash peut être configuré côté serveur.
 - L'organisation d'une requête API doit être déterminée par le serveur depuis la clé authentifiée, jamais acceptée depuis le corps client.
 - Les exports CSV doivent neutraliser les cellules commençant par `=`, `+`, `-` ou `@`.
+- La télémétrie serveur doit rester consentie, minimisée et anonyme : aucun envoi sans consentement explicite porté par le profil CheckLink, et aucune ligne d'événement ne peut porter de contenu de facture, d'identifiant fiscal, d'adresse IP ou de session.
 - Les nouvelles limites de taille doivent être explicites côté interface et code.
 - Aucune donnée sensible ne doit être ajoutée au fragment du CheckLink.
 
@@ -685,7 +686,7 @@ Hypothèses de tarification à tester : abonnement premium plus frais fixe par c
 - incidents de confidentialité ;
 - divergence de position nette, dont la cible est strictement zéro.
 
-Le MVP ne transmet aucune télémétrie. Il conserve uniquement dans le navigateur des compteurs agrégés de profil, partage et validation, sans XML, numéro de facture, fournisseur, montant ni identifiant fiscal. Leur export est volontaire et leur remise à zéro indépendante de l’historique. Toute collecte serveur future doit être consentie, minimisée et documentée.
+Le MVP ne transmet aucune télémétrie **sans consentement**. Depuis 0.22.0, une télémétrie d'activation existe, **consentie, minimisée et anonyme** : l'acheteur coche explicitement « Mesurer l'activation » dans son profil (`usageMetricsConsent`, défaut absent), le consentement voyage dans le fragment CheckLink, et la page fournisseur ne signale que des compteurs `organisation, jour, action, quantité 1` (checklink_copied · invoice_checked · invoice_ready) via `/api/v1/metrics/events` — jamais de numéro de facture, fournisseur, montant, identifiant fiscal, XML, adresse IP ni identifiant de session. Sans consentement, zéro octet ne quitte le navigateur fournisseur (invariant testé par interception fetch). La lecture agrégée exige une clé admin/owner et reste bornée à l'organisation authentifiée ; les compteurs locaux restent à liste blanche, export volontaire et remise à zéro indépendante de l'historique. Toute extension (fournisseurs identifiables, cookies, période sous le jour, tiers) reste hors périmètre sans nouvelle décision.
 
 ## 12. Tests et critères de qualité
 
@@ -700,7 +701,23 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 135 tests
+### 12.2 Couverture actuelle des 147 tests
+
+`test/reporting-client.test.js` — 3 tests :
+
+- **INVARIANT ABSOLU** : sans consentement (champ absent ou faux), aucune requête n'est déclenchée — zéro octet ne quitte le navigateur fournisseur, y compris pour un lien CheckLink ancien ;
+- avec consentement : un seul événement, corps exactement `{ organizationId, action, day }`, route same-origin `/api/v1/metrics/events` ;
+- un échec d'envoi reste silencieux et ne perturbe jamais l'expérience fournisseur.
+
+`test/metrics-server.test.js` — 7 tests :
+
+- liste blanche de l'événement : numéro de facture, fournisseur, montant, TVA, XML, IP ou session ignorés et jamais transportés ; formes invalides rejetées (slug, action inconnue, jour malformé ou futur) ;
+- bornes de période : ordre, format, maximum 92 jours ;
+- agrégation par jour et action, lignes d'autres organisations et hors période ignorées ;
+- export CSV neutralisé (`=`, `+`, `-`, `@` préfixés) ;
+- HTTP : événement accepté 202 anonyme, stockage absent → `503 METRICS_UNAVAILABLE` explicite ;
+- HTTP : lecture `403 FORBIDDEN_ROLE` pour un viewer, isolation stricte entre organisations, lignes hors période ignorées ;
+- HTTP : export CSV authentifié (401 sans clé, 403 viewer, 400 sur période invalide).
 
 `test/failures.test.js` — 3 tests :
 
@@ -708,7 +725,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - réinitialisation au succès, sans pollution entre couples ip/e-mail ;
 - HTTP : 5 échecs → `401 INVALID_CREDENTIALS` puis `429 LOGIN_LOCKED` même avec le bon mot de passe, autre e-mail non affecté.
 
-`test/requirements.test.js` — 7 tests :
+`test/requirements.test.js` — 9 tests :
 
 - liste blanche stricte : contenu de facture, d'obligation, secret ou champ inconnu écarté, normalisation vérifiée ;
 - adaptateur : upsert atomique par organisation et recherche filtrée sur `published=eq.true`, minimisation (pas d'e-mail de soumission ni instructions) ;
@@ -716,7 +733,9 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - vérification officielle : `verified`/`mismatch` (noms de champs divergents)/`not_published`/`unknown` distingués, `stored: false` ;
 - l'organisation B écrit toujours dans son propre espace, jamais dans celui de l'organisation A ;
 - mutation via session membre : `403 CSRF_REQUIRED` sans l'en-tête `X-SettleMesh-CSRF`, `403 FORBIDDEN_ROLE` pour une session viewer, publication 201 pour un owner avec en-tête CSRF (organisation propre uniquement) ;
-- sans stockage configuré : `503 REQUIREMENTS_UNAVAILABLE` côté public et authentifié.
+- sans stockage configuré : `503 REQUIREMENTS_UNAVAILABLE` côté public et authentifié ;
+- recherche TVA généralisée : tout numéro intracommunautaire nettoyé (`/^[A-Z]{2}[0-9A-Z]{5,}$/`) déclenche la condition TVA, pas seulement les « FR » ;
+- incrément de version : chaque écriture d'exigences renvoie une `version` accrue.
 
 `test/requirements-client.test.js` — 1 test :
 
@@ -915,6 +934,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - vérifier qu'une facture litigieuse et une créance cédée sont exclues ;
 - vérification officielle publique d'un CheckLink : publier les exigences d'une organisation puis vérifier `verified`, `mismatch`, `not_published` et `unknown` via `/api/v1/requirements/verify`, sans compte ;
 - dans l'interface : rechercher une exigence dans « Sources & règles », se connecter en membre puis publier/dépublier, et cliquer « Vérifier ce CheckLink » dans l'aperçu fournisseur ;
+- métriques consenties : cocher « Mesurer l'activation » dans Mon CheckLink, copier le CheckLink, contrôler une facture, puis lire `GET /api/v1/metrics?from=…&to=…` avec une clé admin ; décocher la case, vider le stockage du navigateur et constater (réseau du navigateur) qu'aucun événement ne part ; inspecter la table `settlemesh_metrics` pour vérifier qu'aucune ligne ne porte de donnée de facture ;
 - tester la navigation clavier et la largeur mobile.
 
 ## 13. Feuille de route ordonnée
@@ -1018,6 +1038,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-08 | Créer le registre public d'exigences de réception (étape 4 du pack) | Permettre à un fournisseur de trouver et vérifier les exigences d'un client sans compte, et réduire la menace « CheckLink imité » par une vérification officielle publique | Table `public.settlemesh_requirements` (RLS sans policy), publication opt-in explicite jamais silencieuse, matrice admin/owner et organisation résolue côté serveur, recherche minimisée sans compte, vérification `verified/mismatch/not_published/unknown` avec format CheckLink inchangé ; interface navigateur de recherche et signature du profil restent à construire |
 | 2026-10-08 | Ouvrir la première interface navigateur du registre (étape 2b-3) | Rendre visible le backend dans le produit : recherche dans Sources & règles, publication opt-in dans Mon CheckLink (session membre), et bouton « Vérifier ce CheckLink » vu du fournisseur | Les mutations par session exigent l'en-tête CSRF `X-SettleMesh-CSRF` (impossible à forger entre sites avec SameSite=Lax), testé au serveur et au client ; le publish UI recharge le profil courant entier (rél. vérifié : 201 puis `verified` en navigateur, 0 erreur console) ; signature du profil du lien reste à construire |
 | 2026-10-08 | Verrouiller progressivement le login (5 échecs / 10 min par IP+e-mail) | Fermer le risque résiduel « brute force ciblé » du modèle de menace avec des moyens locaux, sans introduire d'énumération (message verrouillé distinct du message identifiants) | `429 LOGIN_LOCKED` après 5 échecs, fenêtre 10 min, traqueur en mémoire borné et purge, réinitialisé au succès ; par processus : protection distribuée et retards aléatoires restent à ajouter avant exposition |
+| 2026-10-08 | **Décision de valeurs (au nom de l'humain)** : accepter une télémétrie d'activation consentie, minimisée et anonyme | L'acheteur doit pouvoir voir la valeur réelle de son CheckLink (fournisseurs actifs, factures contrôlées, factures prêtes) sans espionner personne : consentement explicite coché dans le profil, transporté dans le lien, ligne serveur réduite à organisation/jour/action/quantité 1 — rien qui puisse rattacher un événement à une facture ou une personne | `POST /api/v1/metrics/events` (sans compte, liste blanche stricte, jour futur refusé, limite IP) et lecture agrégée admin/owner (`GET /api/v1/metrics`, export CSV neutralisé) ; sans consentement, zéro octet ne quitte le navigateur fournisseur (invariant testé) ; fournisseurs identifiables, cookies de mesure, périodes sous le jour, tiers et interface de lecture restent hors périmètre sans nouvelle décision ; le SQL de la table `public.settlemesh_metrics` reste à exécuter par l'humain |
 
 ## 16. Questions ouvertes à trancher
 

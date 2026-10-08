@@ -16,6 +16,7 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - vérification à la demande d’un numéro de TVA auprès de VIES, avec résultat horodaté `vérifié`, `non vérifié` ou `indisponible` ;
 - recherche publique et vérification officielle des exigences de réception d'une entreprise, sans compte, à partir de son registre publié (publication opt-in, réponses minimisées) ;
 - interface du registre dans l'app : recherche dans « Sources & règles », publication opt-in depuis « Mon CheckLink » après connexion membre (avec MFA si actif), et bouton « Vérifier ce CheckLink » dans l'aperçu fournisseur ;
+- métriques d'activation **consenties** : une case explicite du profil (`usageMetricsConsent`, défaut désactivé) autorise les fournisseurs qui utilisent le CheckLink à signaler des compteurs anonymes (jour, action, quantité) via `POST /api/v1/metrics/events` — jamais de facture, fournisseur, montant ou identifiant ; sans cette case, zéro octet ne quitte leur navigateur ; lecture agrégée par clé Bearer admin/owner (`GET /api/v1/metrics`, export CSV neutralisé) ;
 - recherche exacte d’un identifiant dans Peppol Directory, avec les mêmes états explicites et sans confusion avec une garantie de joignabilité ;
 - contrôles du destinataire, de la TVA, de l’adresse électronique, du numéro de commande et des totaux ;
 - diagnostic détaillé avec références EN 16931 `BT-*` ;
@@ -33,6 +34,7 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - export JSON volontaire de ces métriques, sans contenu, identifiant, montant ou fournisseur de facture ;
 - interface fournisseur utilisable sans compte ;
 - aucune transmission serveur du contenu des factures depuis l'interface navigateur, aucune télémétrie automatique et aucune persistance dans les APIs pilotes ;
+- la seule collecte serveur existante est la télémétrie d'activation **consentie et anonyme** (0.22.0) : déclenchée uniquement si le profil CheckLink porte le consentement explicite de l'acheteur, réduite à jour + action + quantité, sans contenu de facture ni identifiant personnel ;
 - transmission minimale du pays et du numéro TVA ou de l’identifiant Peppol uniquement après un clic explicite, le temps d’interroger la source officielle.
 
 Le modèle de menace, l'inventaire des données, la revue OWASP/RGPD préliminaire et les portes de mise en production sont documentés dans [`docs/SECURITY.md`](./docs/SECURITY.md).
@@ -75,7 +77,9 @@ Il est aussi possible de déposer jusqu’à 20 fichiers en une fois. Le tableau
 
 Dans **Mon CheckLink**, le profil peut être exporté en JSON puis réimporté dans un autre navigateur. Dans **Contrôles**, l’historique peut être recherché, filtré et exporté en CSV. Il est conservé uniquement dans le navigateur, pendant 30 jours et dans la limite de 100 résultats ; le diagnostic détaillé reste limité à la session courante.
 
-La **Vue d’ensemble** contient aussi un bloc « Mesure pilote ». Ses compteurs sont enregistrés dans le navigateur, séparément de l’historique limité à 100 résultats. Ils peuvent être exportés volontairement en JSON ou remis à zéro sans supprimer l’historique. Cet export ne contient pas le XML, les numéros de facture, les fournisseurs, les montants ni les identifiants fiscaux.
+La **Vue d'ensemble** contient aussi un bloc « Mesure pilote ». Ses compteurs sont enregistrés dans le navigateur, séparément de l'historique limité à 100 résultats. Ils peuvent être exportés volontairement en JSON ou remis à zéro sans supprimer l'historique. Cet export ne contient pas le XML, les numéros de facture, les fournisseurs, les montants ni les identifiants fiscaux.
+
+Dans **Mon CheckLink**, la case « Mesurer l'activation (consenti) » autorise — et seulement si elle est cochée — les fournisseurs qui utilisent le CheckLink à signaler des compteurs anonymes côté serveur : jour, action (CheckLink copié, facture contrôlée, facture prête) et quantité. Aucun numéro de facture, fournisseur, montant, identifiant fiscal ou adresse IP n'est transmis ou stocké ; l'envoi part uniquement quand le lien décodé porte ce consentement, et zéro octet ne quitte le navigateur fournisseur sinon. Les agrégats se lisent avec une clé admin ou owner : `GET /api/v1/metrics?from=…&to=…` et `GET /api/v1/metrics/export?from=…&to=…` (CSV neutralisé).
 
 Dans **Sources & règles**, les contrôles VIES et Peppol Directory sont lancés manuellement. Un état « vérifié » signifie uniquement que la source a répondu positivement à l’instant indiqué. Les identifiants et réponses ne sont pas ajoutés à l’historique SettleMesh ni au stockage du navigateur.
 

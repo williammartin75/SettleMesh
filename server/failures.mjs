@@ -1,5 +1,5 @@
 // Traqueur d'échecs de connexion (verrouillage progressif) : pure logique
-// testable. N fenêtes échecs dans la fenêtre → verrou jusqu'à expiration de
+// testable. N échecs dans la fenêtre → verrou jusqu'à expiration de la
 // la fenêtre ; en mémoire par processus, borné à 10 000 entrées, purge des
 // entrées expirées. Jamais écrit dans le registre managé ni télémétrie.
 

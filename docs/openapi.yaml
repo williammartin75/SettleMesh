@@ -247,6 +247,124 @@ paths:
           $ref: '#/components/responses/ApiError'
         '503':
           $ref: '#/components/responses/ApiError'
+  /metrics/events:
+    post:
+      operationId: reportMetricEvent
+      summary: Signaler un événement d'activation anonyme (sans compte, consentement porté par le profil CheckLink)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [organizationId, action, day]
+              properties:
+                organizationId: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,63}$' }
+                action: { type: string, enum: [checklink_copied, invoice_checked, invoice_ready] }
+                day: { type: string, format: date }
+      responses:
+        '202':
+          description: Événement accepté (ligne anonyme organisation/jour/action/quantité 1)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema: { const: settlemesh-metrics }
+                  apiVersion: { const: v1 }
+                  requestId: { type: string }
+                  accepted: { const: true }
+                  event:
+                    type: object
+                    properties:
+                      organizationId: { type: string }
+                      action: { type: string }
+                      day: { type: string, format: date }
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '503':
+          $ref: '#/components/responses/ApiError'
+  /metrics:
+    get:
+      operationId: readMetricAggregates
+      summary: Lire les agrégats d'activation de l'organisation authentifiée (admin/owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Agrégats par jour et action (max 92 jours, organisation résolue côté serveur)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema: { const: settlemesh-metrics }
+                  apiVersion: { const: v1 }
+                  requestId: { type: string }
+                  organizationId: { type: string }
+                  from: { type: string, format: date }
+                  to: { type: string, format: date }
+                  totals:
+                    type: object
+                    properties:
+                      checklink_copied: { type: integer }
+                      invoice_checked: { type: integer }
+                      invoice_ready: { type: integer }
+                  days:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        day: { type: string, format: date }
+                        action: { type: string }
+                        count: { type: integer }
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '403':
+          $ref: '#/components/responses/ApiError'
+        '503':
+          $ref: '#/components/responses/ApiError'
+  /metrics/export:
+    get:
+      operationId: exportMetricCsv
+      summary: Exporter les agrégats en CSV neutralisé (admin/owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: CSV neutralisé day,action,count
+          content:
+            text/csv:
+              schema: { type: string }
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '403':
+          $ref: '#/components/responses/ApiError'
+        '503':
+          $ref: '#/components/responses/ApiError'
   /admin/keys:
     get:
       operationId: listAdminKeys
@@ -760,7 +878,8 @@ components:
                 INVALID_ADMIN_PAYLOAD (400), UNKNOWN_ADMIN_ROUTE (404),
                 INVALID_REQUIREMENTS_PAYLOAD (400), INVALID_REQUIREMENTS_QUERY
                 (400), REQUIREMENTS_UNAVAILABLE (503), CSRF_REQUIRED (403),
-                LOGIN_LOCKED (429), RATE_LIMITED et
+                INVALID_METRICS_PAYLOAD (400), INVALID_METRICS_RANGE (400),
+                METRICS_UNAVAILABLE (503), LOGIN_LOCKED (429), RATE_LIMITED et
                 UPSTREAM_RATE_LIMITED (429), INVALID_JSON,
                 INVALID_VAT_COUNTRY, INVALID_VAT_NUMBER, INVALID_PEPPOL_ID,
                 IDENTITY_CHECK_FAILED, METHOD_NOT_ALLOWED, NOT_FOUND,

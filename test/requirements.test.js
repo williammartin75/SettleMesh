@@ -64,6 +64,35 @@ test("l'adaptateur publie via upsert atomique et cherche uniquement ce qui est p
   await assert.rejects(() => store.search(""), /mot-cl/);
 });
 
+test("la recherche traite tout numéro intracommunautaire (pas seulement FR) comme une TVA", async () => {
+  const calls = [];
+  const fetchStub = async (url) => {
+    calls.push(url);
+    return { ok: true, status: 200, json: async () => [], text: async () => "" };
+  };
+  const store = createSupabaseRequirements({ projectRef: "ref0000000000000", serviceKey: "sk", fetchImpl: fetchStub });
+  await store.search("DE123456789");
+  await store.search("BE0123456789");
+  await store.search("atelier nova");
+  assert.equal(calls.filter((url) => url.includes("vat_id.eq.DE123456789")).length, 1, "le numéro DE déclenche la recherche TVA");
+  assert.equal(calls.filter((url) => url.includes("vat_id.eq.BE0123456789")).length, 1, "le numéro BE déclenche la recherche TVA");
+  assert.ok(calls.some((url) => url.includes("company_name.ilike.")), "la raison sociale reste cherchée");
+});
+
+test("chaque écriture d'exigences incrémente la version et la renvoie", async () => {
+  let stored = null;
+  const fetchStub = async (url, init = {}) => {
+    if ((init.method || "GET") === "GET") return { ok: true, status: 200, json: async () => (stored ? [stored] : []), text: async () => "" };
+    stored = JSON.parse(init.body);
+    return { ok: true, status: 201, json: async () => [stored], text: async () => "" };
+  };
+  const store = createSupabaseRequirements({ projectRef: "ref0000000000000", serviceKey: "sk", fetchImpl: fetchStub });
+  const first = await store.upsert({ organizationId: "atelier-nova", profile: { companyName: "Atelier Nova" }, published: true });
+  assert.equal(first.version, 1);
+  const second = await store.upsert({ organizationId: "atelier-nova", profile: { companyName: "Atelier Nova", instructions: "maj" }, published: true });
+  assert.equal(second.version, 2);
+});
+
 test("HTTP : publication opt-in, viewer refusé, brouillon non cherchable (invariant central)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "settlemesh-req-"));
   const registryPath = join(dir, "registry.json");

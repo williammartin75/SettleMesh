@@ -11,6 +11,7 @@ import { createSupabaseRequirements, sanitizeRequirementProfile, verifyAgainstPu
 import { verifyTotp, generateTotpSecret } from "./totp.mjs";
 import { handleAdminRequest } from "./admin.mjs";
 import { createFailureTracker } from "./failures.mjs";
+import { createSupabaseMetrics, aggregateMetricRows, metricsCsv, validateMetricEvent, validateMetricRange, METRICS_SCHEMA } from "./metrics.mjs";
 import { validateApiInvoice } from "./validation.mjs";
 import { IdentityInputError, verifyPeppol, verifyVies } from "../worker/identity.mjs";
 
@@ -111,6 +112,7 @@ export function createSettleMeshServer({
   registryFile = process.env.SETTLEMESH_REGISTRY_FILE || "",
   membersStoreOption = null,
   requirementsStoreOption = null,
+  metricsStoreOption = null,
   cookieSecure = String(process.env.SETTLEMESH_COOKIE_SECURE || "") === "1",
   identityFetch = fetch
 } = {}) {
@@ -129,6 +131,12 @@ export function createSettleMeshServer({
   const loginFailures = createFailureTracker({ limit: 5, windowMs: 600_000 });
   const requirementsStore = requirementsStoreOption || (supabaseRegistry
     ? createSupabaseRequirements({
+      projectRef: process.env.SETTLEMESH_SUPABASE_PROJECT_REF,
+      serviceKey: process.env.SETTLEMESH_SUPABASE_SERVICE_KEY
+    })
+    : null);
+  const metricsStore = metricsStoreOption || (supabaseRegistry
+    ? createSupabaseMetrics({
       projectRef: process.env.SETTLEMESH_SUPABASE_PROJECT_REF,
       serviceKey: process.env.SETTLEMESH_SUPABASE_SERVICE_KEY
     })
@@ -496,6 +504,82 @@ export function createSettleMeshServer({
             return jsonResponse(response, 503, failure.body, ipRateHeaders);
           }
           const failure = apiError(requestId, error.code || "INVALID_REQUIREMENTS_PAYLOAD", error.message || "Profil illisible.", error.status || 400);
+          return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
+        }
+      }
+
+      // — Métriques d'activation consenties (0.22.0) —
+      // Événement anonyme : { organizationId, action, day } uniquement,
+      // liste blanche stricte, sans compte, limité par la limite IP générale.
+      if (url.pathname === "/api/v1/metrics/events" && request.method === "POST") {
+        if (!metricsStore) {
+          const failure = apiError(requestId, "METRICS_UNAVAILABLE", "La collecte consentie exige le stockage managé.", 503);
+          return jsonResponse(response, 503, failure.body, ipRateHeaders);
+        }
+        try {
+          const payload = await readJson(request);
+          const event = validateMetricEvent(payload);
+          await metricsStore.insert(event);
+          return jsonResponse(response, 202, { schema: METRICS_SCHEMA, apiVersion: API_VERSION, requestId, accepted: true, event }, ipRateHeaders);
+        } catch (error) {
+          if (error?.code === "METRICS_UNAVAILABLE") {
+            const failure = apiError(requestId, error.code, error.message, 503);
+            return jsonResponse(response, 503, failure.body, ipRateHeaders);
+          }
+          const failure = apiError(requestId, error?.code || "INVALID_METRICS_PAYLOAD", error?.message || "Événement de mesure illisible.", error?.status || 400);
+          return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
+        }
+      }
+
+      if (url.pathname === "/api/v1/metrics" || url.pathname === "/api/v1/metrics/export") {
+        if (!metricsStore) {
+          const failure = apiError(requestId, "METRICS_UNAVAILABLE", "La collecte consentie exige le stockage managé.", 503);
+          return jsonResponse(response, 503, failure.body, ipRateHeaders);
+        }
+        let authentication;
+        try {
+          authentication = await authenticateApiKey(request.headers.authorization, await credentialsSource());
+        } catch (registryError) {
+          const failure = apiError(requestId, registryError?.code || "SUPABASE_REGISTRY_UNAVAILABLE", registryError?.message || "Registre d'organisations indisponible.", registryError?.status || 503);
+          return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
+        }
+        if (!authentication.ok) {
+          const error = apiError(requestId, authentication.code, authentication.message, authentication.statusCode);
+          const challenge = authentication.statusCode === 401 ? { "WWW-Authenticate": 'Bearer realm="SettleMesh API"' } : {};
+          return jsonResponse(response, error.status, error.body, { ...ipRateHeaders, ...challenge });
+        }
+        const credential = authentication.credential;
+        if (!["owner", "admin"].includes(credential.role)) {
+          const failure = apiError(requestId, "FORBIDDEN_ROLE", "La lecture des métriques exige le rôle admin ou owner.", 403);
+          return jsonResponse(response, 403, failure.body, ipRateHeaders);
+        }
+        const organizationRate = consumeOrganizationRate(credential.organizationId, credential.requestsPerMinute);
+        if (!organizationRate.allowed) {
+          const error = apiError(requestId, "RATE_LIMITED", "Quota de l'organisation atteint. Réessayez dans une minute.", 429);
+          return jsonResponse(response, 429, error.body, rateHeaders(organizationRate, credential.requestsPerMinute, "organization"));
+        }
+        try {
+          const { from, to } = validateMetricRange(url.searchParams.get("from"), url.searchParams.get("to"));
+          const rows = await metricsStore.range({ organizationId: credential.organizationId, from, to });
+          const aggregated = aggregateMetricRows(rows, { organizationId: credential.organizationId, from, to });
+          if (url.pathname === "/api/v1/metrics/export") {
+            const csv = metricsCsv(aggregated);
+            response.writeHead(200, {
+              ...ipRateHeaders,
+              "Content-Type": "text/csv; charset=utf-8",
+              "Content-Disposition": `attachment; filename="settlemesh-metriques-${from}-${to}.csv"`,
+              "Cache-Control": "no-store"
+            });
+            response.end(csv);
+            return;
+          }
+          return jsonResponse(response, 200, { schema: METRICS_SCHEMA, apiVersion: API_VERSION, requestId, ...aggregated }, ipRateHeaders);
+        } catch (error) {
+          if (error?.code === "METRICS_UNAVAILABLE") {
+            const failure = apiError(requestId, error.code, error.message, 503);
+            return jsonResponse(response, 503, failure.body, ipRateHeaders);
+          }
+          const failure = apiError(requestId, error?.code || "INVALID_METRICS_RANGE", error?.message || "Période de métriques illisible.", error?.status || 400);
           return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
         }
       }
