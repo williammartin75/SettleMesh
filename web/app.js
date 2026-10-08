@@ -1,3 +1,4 @@
+import { captureAnalysisContext, analysisContextIsCurrent } from "./analysis-context.js";
 import {
   DEFAULT_PROFILE,
   appendValidationChecks,
@@ -25,7 +26,7 @@ import {
   summarizeLocalMetrics
 } from "./metrics.js";
 import { createNettingDemo, exportNettingCsv, nettingCsvTemplate, parseNettingCsv, simulateNetting } from "./netting.js";
-import { publishRequirements, searchRequirements, unpublishRequirements, verifyRequirements } from "./requirements.js";
+import { publishRequirements, searchRequirements, unpublishRequirements, verifyRequirements, resolveRequirements } from "./requirements.js";
 import { reportEvent } from "./reporting.js";
 import { activePacks } from "./rules/index.mjs";
 import { validateEuropeanStandard } from "./standards.js";
@@ -81,7 +82,7 @@ function loadState() {
       lastResult: saved?.lastResult || null,
       metrics: normalizeLocalMetrics(saved?.metrics, { history }),
       netting: {
-        obligations: Array.isArray(saved?.netting?.obligations) ? saved.netting.obligations.slice(0, 500) : [],
+        obligations: Array.isArray(saved?.netting?.obligations) && saved.netting.obligations.length <= 500 ? saved.netting.obligations : [],
         source: saved?.netting?.source || "",
         scenario: normalizeNettingScenario(saved?.netting?.scenario)
       }
@@ -101,6 +102,8 @@ let currentBatch = [];
 let historyQuery = "";
 let historyOutcome = "all";
 let currentNettingSimulation = null;
+let linkLoadBlocked = false;
+let locationRevision = 0;
 
 function activeProfile() { return publicProfile || state.profile; }
 function initials(name) { return String(name || "EU").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase(); }
@@ -164,8 +167,36 @@ function setView(view, { updateHash = true } = {}) {
   if (view === "sources") prefillIdentityForms();
 }
 
-function parseLocation() {
+async function parseLocation() {
+  const revision = ++locationRevision;
+  linkLoadBlocked = false;
+  $("#visitor-metrics-consent").checked = false;
+  $("#result-area").hidden = true;
+  $("#batch-panel").hidden = true;
+  $("#checklink-verify-result").hidden = true;
   const hash = location.hash || "#overview";
+  if (hash.startsWith("#buyer/")) {
+    linkLoadBlocked = true;
+    publicProfile = { companyName: "Chargement du profil publié…", legalName: "", acceptedFormats: [], acceptedCurrencies: [] };
+    document.body.classList.add("public-mode");
+    setView("checker", { updateHash: false });
+    $("#link-status").textContent = "Chargement des exigences courantes. Ne déposez pas encore de facture.";
+    renderProfileSurface(publicProfile);
+    try {
+      const record = await resolveRequirements(hash.slice(7));
+      if (revision !== locationRevision) return;
+      publicProfile = { ...record.profile, organizationId: record.organizationId, published: true, version: record.version, metricsToken: record.metricsToken };
+      linkLoadBlocked = false;
+      renderProfileSurface(publicProfile);
+      $("#link-status").textContent = `Exigences publiées · version ${record.version} · chargées à l'ouverture. Déclarations de l'acheteur, pas certification d'identité ou de conformité juridique.`;
+    } catch (error) {
+      if (revision !== locationRevision) return;
+      publicProfile.companyName = "Lien indisponible";
+      renderProfileSurface(publicProfile);
+      $("#link-status").textContent = `${error.message} Aucun profil de remplacement utilisé ; le contrôle est bloqué.`;
+    }
+    return;
+  }
   if (hash.startsWith("#check/")) {
     const parts = hash.split("/");
     const decoded = decodeProfile(parts.at(-1));
@@ -175,10 +206,13 @@ function parseLocation() {
       currentView = "checker";
       $$(".view").forEach((item) => item.classList.toggle("active", item.dataset.view === "checker"));
       renderProfileSurface(decoded);
+      $("#link-status").textContent = "Lien instantané non authentifié : les exigences sont intégrées au lien et ne se mettent pas à jour. Comparez-les au registre avant utilisation.";
       return;
     }
   }
   publicProfile = null;
+  renderProfileSurface(state.profile);
+  $("#link-status").textContent = "Profil local de démonstration, non certifié. Publiez vos exigences pour obtenir un lien stable.";
   document.body.classList.remove("public-mode");
   const route = hash.slice(1);
   setView(TITLES[route] ? route : "overview", { updateHash: false });
@@ -310,6 +344,8 @@ function fillProfileForm() {
 function profileFromForm(form) {
   const data = new FormData(form);
   return {
+    ...(state.profile.organizationId ? { organizationId: state.profile.organizationId } : {}),
+    published: false,
     companyName: String(data.get("companyName") || "").trim(), legalName: String(data.get("legalName") || "").trim(),
     country: String(data.get("country") || "FR"), vatId: String(data.get("vatId") || "").trim().toUpperCase(),
     peppolId: String(data.get("peppolId") || "").trim(), routingProvider: String(data.get("routingProvider") || "").trim(),
@@ -414,10 +450,12 @@ function renderNetting() {
 
   $("#netting-positions").innerHTML = simulation.positions.length ? simulation.positions.map((position) => `<div class="netting-position"><div><strong>${escapeHtml(position.name)}</strong><small>${escapeHtml(position.currency)} · à recevoir ${escapeHtml(formatMoney(position.receivable, position.currency))} · à payer ${escapeHtml(formatMoney(position.payable, position.currency))}</small></div><span class="${position.netPosition >= 0 ? "positive" : "negative"}">${position.netPosition >= 0 ? "+" : "−"}${escapeHtml(formatMoney(Math.abs(position.netPosition), position.currency))}</span></div>`).join("") : `<div class="empty-inline">Aucune position dans le périmètre sélectionné.</div>`;
   $("#netting-residuals").innerHTML = simulation.residuals.length ? simulation.residuals.map((item) => `<div class="residual-row"><strong>${escapeHtml(item.debtor)}</strong><span>→</span><strong>${escapeHtml(item.creditor)}</strong><strong>${escapeHtml(formatMoney(item.remainingAmount, item.currency))}</strong></div>`).join("") : `<div class="empty-inline">Aucun paiement résiduel dans la simulation.</div>`;
+  $("#netting-exclusions").innerHTML = `<h3>Factures exclues du calcul</h3>${[...simulation.ignored, ...simulation.deferred].map((item) => `<p>${escapeHtml(item.invoiceNumber || "Sans référence")} · ${escapeHtml(item.reason)}</p>`).join("") || "<p>Aucune exclusion.</p>"}`;
 }
 
 function applyNettingObligations(obligations, source) {
-  state.netting = { obligations: obligations.slice(0, 500), source, scenario: { mode: "all", cutoffDate: "" } };
+  simulateNetting(obligations); // Validate capacity and invariants before replacing local state.
+  state.netting = { obligations, source, scenario: { mode: "all", cutoffDate: "" } };
   persist();
   renderNetting();
   if (currentView === "netting") $("#netting-results").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -442,6 +480,7 @@ function renderResult(result) {
 }
 
 async function buildValidationResult(xmlText, source = {}, progressPrefix = "") {
+  if (linkLoadBlocked) throw new Error("Le profil publié est indisponible ou en cours de chargement. Aucun contrôle possible.");
   const { containerChecks = [], ...invoiceSource } = source;
   const invoice = { ...parseInvoiceXml(xmlText), ...invoiceSource };
   let result = validateInvoice(invoice, activeProfile());
@@ -472,22 +511,26 @@ function saveResults(results) {
   // effectif est celui du lien CheckLink (fournisseur) ou le profil local.
   const profile = publicProfile || state.profile;
   for (const result of results) {
-    reportEvent(profile, "invoice_checked").catch(() => {});
-    if (result.outcome === "ready") reportEvent(profile, "invoice_ready").catch(() => {});
+    const visitorConsent = $("#visitor-metrics-consent").checked;
+    reportEvent(profile, "invoice_checked", { visitorConsent }).catch(() => {});
+    if (result.outcome === "ready") reportEvent(profile, "invoice_ready", { visitorConsent }).catch(() => {});
   }
 }
 
 async function analyze(xmlText, source = {}) {
   const startedAt = performance.now();
+  const context = captureAnalysisContext(activeProfile(), locationRevision);
   try {
     setValidationProgress(true, "Lecture de la facture…");
     const result = await buildValidationResult(xmlText, source);
+    if (!analysisContextIsCurrent(context, activeProfile(), locationRevision)) return;
     state.metrics = recordValidationRun(state.metrics, { submitted: 1, results: [result], durationMs: performance.now() - startedAt });
     saveResults([result]);
     $("#batch-panel").hidden = true;
     renderResult(result);
     toast("Contrôle terminé", resultSummary(result).headline);
   } catch (error) {
+    if (!analysisContextIsCurrent(context, activeProfile(), locationRevision)) return;
     state.metrics = recordValidationRun(state.metrics, { submitted: 1, results: [], durationMs: performance.now() - startedAt });
     persist();
     renderDashboard();
@@ -524,6 +567,7 @@ async function analyzeFiles(fileList) {
   if (!selected.length) return;
   const files = selected.slice(0, 20);
   const startedAt = performance.now();
+  const context = captureAnalysisContext(activeProfile(), locationRevision);
   if (selected.length > files.length) toast("Lot limité à 20 fichiers", `${selected.length - files.length} fichier(s) n’ont pas été traités.`);
   const entries = [];
   setValidationProgress(true, `Préparation de ${files.length} fichier${files.length > 1 ? "s" : ""}…`);
@@ -534,13 +578,16 @@ async function analyzeFiles(fileList) {
       setValidationProgress(true, `${prefix}${/\.pdf$/i.test(file.name) ? "Extraction Factur-X…" : "Lecture du XML…"}`);
       try {
         const payload = await readInvoiceFile(file);
+        if (!analysisContextIsCurrent(context, activeProfile(), locationRevision)) return;
         const result = await buildValidationResult(payload.xmlText, payload.source, prefix);
+        if (!analysisContextIsCurrent(context, activeProfile(), locationRevision)) return;
         entries.push({ name: file.name, result });
       } catch (error) {
         entries.push({ name: file.name, error: error.message || "Document non analysable." });
       }
     }
     const results = entries.flatMap((entry) => entry.result ? [entry.result] : []);
+    if (!analysisContextIsCurrent(context, activeProfile(), locationRevision)) return;
     state.metrics = recordValidationRun(state.metrics, { submitted: files.length, results, durationMs: performance.now() - startedAt, batch: files.length > 1 });
     persist();
     renderDashboard();
@@ -748,7 +795,7 @@ function setupEvents() {
         area.innerHTML = `<div class="empty-inline">Aucune exigence publiée ne correspond à « ${escapeHtml(query)} ». Seules les entreprises qui publient explicitement apparaissent.</div>`;
         return;
       }
-      area.innerHTML = body.results.map((result) => `<article class="requirement-result"><div><strong>${escapeHtml(result.profile.companyName || result.profile.legalName)}</strong><small>${escapeHtml(result.profile.country || "—")} · TVA ${escapeHtml(result.profile.vatId || "non publiée")} · ${escapeHtml((result.profile.acceptedFormats || []).join(", ") || "formats non publiés")}</small></div><span class="result-tag ready">publié</span></article>`).join("");
+      area.innerHTML = body.results.map((result) => `<article class="requirement-result"><div><strong>${escapeHtml(result.profile.companyName || result.profile.legalName)}</strong><small>${escapeHtml(result.profile.country || "—")} · TVA ${escapeHtml(result.profile.vatId || "non publiée")} · ${escapeHtml((result.profile.acceptedFormats || []).join(", ") || "formats non publiés")}</small></div><a class="button secondary" href="#buyer/${encodeURIComponent(result.organizationId)}">Ouvrir le CheckLink</a></article>`).join("");
     } catch (error) {
       area.innerHTML = `<div class="empty-inline">${escapeHtml(error.message || "Recherche indisponible.")}</div>`;
     }
@@ -768,7 +815,7 @@ function setupEvents() {
         verified: ["Pass", "Le lien correspond aux exigences publiées par l'entreprise. Même verdict à l'instant de la requête."],
         mismatch: ["Review", "Le profil du lien diverge des exigences publiées : prudence, demandez confirmation à l'acheteur."],
         not_published: ["Review", "L'entreprise a enregistré des exigences mais ne les a pas publiées."],
-        unknown: ["Idle", "Aucune exigence publiée pour cette entreprise : la vérification officielle ne peut pas se prononcer."]
+        unknown: ["Non trouvé", "Aucune exigence publiée correspondante. Ce contrôle du registre n'est pas une vérification officielle de l'entreprise."]
       };
       const [status, message] = labels[body.verdict] || ["Idle", body.reason];
       area.className = `identity-result ${body.verdict === "verified" ? "verified" : body.verdict === "mismatch" ? "error" : "idle"}`;
@@ -818,6 +865,8 @@ function setupEvents() {
   $("#publish-requirements").addEventListener("click", async () => {
     try {
       const body = await publishRequirements(state.profile, { published: true });
+      state.profile = { ...state.profile, organizationId: body.organizationId, published: body.published === true, version: body.version };
+      persist(); renderAll();
       toast("Exigences publiées", body.notice || "Cherchables publiquement, sans compte.");
     } catch (error) {
       toast("Publication impossible", error.message || "Connectez-vous d'abord (rôle admin ou owner).");
@@ -826,6 +875,8 @@ function setupEvents() {
   $("#unpublish-requirements").addEventListener("click", async () => {
     try {
       await unpublishRequirements();
+      state.profile.published = false;
+      persist(); renderAll();
       toast("Exigences dépubliées", "Plus cherchable dans le registre public.");
     } catch (error) {
       toast("Dépublication impossible", error.message || "Connectez-vous d'abord.");
@@ -839,3 +890,21 @@ setupEvents();
 parseLocation();
 renderAll();
 fillProfileForm();
+async function refreshMemberAccess() {
+  const status = $("#member-session-status");
+  try {
+    const health = await fetch("/api/v1/health").then((response) => response.json());
+    const hosted = health.authentication?.mode === "sites";
+    $("#site-signin").hidden = !hosted;
+    $("#member-login-form").hidden = hosted;
+    const response = await fetch("/api/v1/auth/me");
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error?.message || "Connexion et invitation acheteur requises.");
+    status.textContent = `Espace ${body.organizationId} · rôle ${body.member.role}. La connexion ne certifie pas l'identité juridique de l'entreprise.`;
+    $("#publish-requirements").disabled = !["owner", "admin"].includes(body.member.role);
+    $("#unpublish-requirements").disabled = !["owner", "admin"].includes(body.member.role);
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+refreshMemberAccess();

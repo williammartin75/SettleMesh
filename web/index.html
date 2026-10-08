@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="SettleMesh CheckLink aide les fournisseurs à vérifier leurs factures électroniques avant l’envoi.">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'">
   <title>SettleMesh — De la conformité au paiement net</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23111827'/%3E%3Cpath d='M17 20h27M17 32h18M17 44h27' stroke='%23fff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='m35 31 5 5 9-12' stroke='%23b9f469' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./styles.css">
@@ -38,7 +38,7 @@
         <span class="trust-icon">◎</span>
         <div><strong>Analyse locale</strong><small>Les factures restent dans ce navigateur.</small></div>
       </div>
-      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.22</strong></div>
+      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.24</strong></div>
     </aside>
 
     <main class="main">
@@ -72,7 +72,7 @@
             <article class="metric"><span>Profil complété</span><strong id="metric-profile">—</strong><small id="metric-profile-copy">Configuration en cours</small></article>
             <article class="metric"><span>Contrôles effectués</span><strong id="metric-checks">0</strong><small>dans ce navigateur</small></article>
             <article class="metric"><span>Factures prêtes</span><strong id="metric-ready">0</strong><small id="metric-ready-rate">Aucun contrôle</small></article>
-            <article class="metric accent"><span>Anomalies évitées</span><strong id="metric-errors">0</strong><small>avant transmission</small></article>
+            <article class="metric accent"><span>Anomalies détectées</span><strong id="metric-errors">0</strong><small>pas une preuve de rejets évités</small></article>
           </div>
 
           <article class="panel pilot-metrics-panel">
@@ -87,7 +87,7 @@
               <div><span>Diagnostics prêts</span><strong id="pilot-ready-rate">—</strong><small>part des diagnostics sans erreur ni alerte</small></div>
               <div><span>Temps moyen local</span><strong id="pilot-average-time">—</strong><small>par lancement de contrôle</small></div>
             </div>
-            <div class="pilot-privacy"><span>◎</span><div><strong>Aucune télémétrie réseau</strong><small>Aucun XML, numéro de facture, fournisseur, montant ou identifiant n’entre dans ces métriques.</small></div><small id="pilot-period">Période locale en cours</small></div>
+            <div class="pilot-privacy"><span>◎</span><div><strong>Ces compteurs restent locaux</strong><small>Aucun XML, numéro de facture, fournisseur, montant ou identifiant n’entre dans ces métriques. La mesure serveur facultative est distincte et requiert l'accord du fournisseur.</small></div><small id="pilot-period">Période locale en cours</small></div>
           </article>
 
           <article class="netting-banner">
@@ -105,8 +105,7 @@
 
             <article class="panel preview-panel">
               <div class="panel-head"><div><span class="section-label">Ce que voit un fournisseur</span><h3 id="preview-company-name">Atelier Nova</h3></div><button class="icon-button" type="button" data-route="checker" aria-label="Ouvrir l’aperçu">↗</button></div>
-              <form id="checklink-verify-form" class="checklink-verify"><button class="button secondary" type="submit"><span>Vérifier ce CheckLink</span><small>vérification publique contre les exigences publiées</small></button></form>
-              <div class="identity-result idle" id="checklink-verify-result" aria-live="polite" hidden><span>—</span><div><strong>Résultat</strong><small>La vérification compare ce lien aux exigences publiées par l'entreprise.</small></div></div>
+              <button class="button secondary" type="button" data-route="checker">Vérifier le lien et tester une facture</button>
               <div class="recipient-card">
                 <div class="recipient-top"><span class="large-avatar" id="preview-avatar">AN</span><div><strong id="preview-legal-name">Atelier Nova SAS</strong><small id="preview-vat">FR40123456789</small></div><span class="country-badge" id="preview-country">FR</span></div>
                 <div class="rule-chips" id="preview-rules"></div>
@@ -148,7 +147,7 @@
                   <label class="toggle-row"><div><strong>Pièce justificative demandée</strong><small>Visible dans les instructions du fournisseur.</small></div><input type="checkbox" name="requireAttachment"><span class="toggle"></span></label>
                 </div>
                 <label class="wide-field"><span>Instructions complémentaires</span><textarea name="instructions" rows="4" placeholder="Ex. Ajoutez le numéro de commande communiqué par votre contact."></textarea></label>
-                <label class="toggle-row metrics-consent-row"><div><strong>Mesurer l'activation (consenti)</strong><small>Les fournisseurs qui utilisent ce CheckLink signalent un compteur anonyme : jour, action, quantité — jamais de facture, fournisseur, montant ou identifiant. Sans cette case, aucun octet ne quitte leur navigateur.</small></div><input type="checkbox" name="usageMetricsConsent"><span class="toggle"></span></label>
+                <label class="toggle-row metrics-consent-row"><div><strong>Proposer une mesure d'usage facultative</strong><small>Uniquement sur le lien publié, avec l'accord distinct du fournisseur : organisation, jour et action, jamais de contenu de facture. L'hébergeur reçoit les métadonnées réseau usuelles. Ces signaux ne prouvent ni clients uniques ni rejets évités.</small></div><input type="checkbox" name="usageMetricsConsent"><span class="toggle"></span></label>
               </article>
               <div class="form-actions"><span id="save-status">Enregistré localement</span><button class="button primary" type="submit">Enregistrer et actualiser le lien</button></div>
             </div>
@@ -158,6 +157,8 @@
               <article class="panel publish-panel">
                 <span class="section-label">Registre public · opt-in</span>
                 <h3>Exigences publiques</h3>
+                <a class="button secondary full" id="site-signin" href="/signin-with-chatgpt?return_to=%2F%23profile" target="_top" hidden>Connexion acheteur avec ChatGPT</a>
+                <p id="member-session-status" class="legal-note" aria-live="polite">Vérification de l'accès acheteur…</p>
                 <div id="member-login-form" class="member-login">
                   <label><span>E-mail du membre</span><input id="member-email" type="email" autocomplete="username" required></label>
                   <label><span>Mot de passe</span><input id="member-password" type="password" autocomplete="current-password" required></label>
@@ -181,6 +182,12 @@
             <div class="accepted-pills" id="checker-pills"></div>
           </div>
 
+          <article class="panel checklink-status-panel">
+            <p id="link-status" aria-live="polite">Profil local de démonstration. Il n'est pas certifié ni publié dans le registre.</p>
+            <form id="checklink-verify-form" class="checklink-verify"><button class="button secondary" type="submit">Comparer avec le registre publié</button></form>
+            <div class="identity-result idle" id="checklink-verify-result" aria-live="polite" hidden><span>—</span><div><strong>Résultat</strong><small>Correspondance des exigences uniquement, pas certification de l'entreprise.</small></div></div>
+            <label class="visitor-consent"><input type="checkbox" id="visitor-metrics-consent"> J'autorise l'envoi de compteurs d'usage à cet acheteur (organisation, action et jour uniquement). Aucune facture envoyée ; l'hébergeur reçoit les informations techniques de la requête. Facultatif.</label>
+          </article>
           <div class="checker-layout">
             <article class="panel upload-panel" id="upload-panel">
               <div class="upload-icon">↥</div><h3>Déposez votre facture structurée</h3><p>Le contrôle s’effectue dans ce navigateur. Votre facture n’est ni transmise ni archivée.</p>
@@ -189,7 +196,7 @@
               <div class="upload-divider"><span>ou tester maintenant</span></div>
               <div class="sample-actions"><button class="button secondary" id="demo-invalid" type="button">Exemple avec erreurs</button><button class="button ghost" id="demo-valid" type="button">Exemple conforme</button></div>
               <button class="paste-toggle" id="paste-toggle" type="button">Coller du XML manuellement <span>⌄</span></button>
-              <div class="paste-box" id="paste-box" hidden><textarea id="xml-input" rows="9" spellcheck="false" placeholder="<?xml version=\"1.0\"?>…"></textarea><button class="button primary full" id="analyze-pasted" type="button">Analyser le XML</button></div>
+              <div class="paste-box" id="paste-box" hidden><textarea id="xml-input" rows="9" spellcheck="false" placeholder="&lt;?xml version=&quot;1.0&quot;?&gt;…"></textarea><button class="button primary full" id="analyze-pasted" type="button">Analyser le XML</button></div>
               <div class="privacy-line"><span>◉</span><div><strong>Confidentialité par conception</strong><small>Le MVP traite les fichiers en mémoire et ne les stocke pas.</small></div></div>
             </article>
 
@@ -218,7 +225,7 @@
           <div class="netting-layout">
             <article class="panel netting-input-panel">
               <div class="form-section-title"><span>01</span><div><h3>Charger les obligations</h3><p>Une ligne par facture client ou fournisseur.</p></div></div>
-              <div class="netting-drop" id="netting-drop" tabindex="0" role="button"><input id="netting-file" type="file" accept=".csv,text/csv" hidden><span>⇄</span><div><strong>Importer un registre CSV</strong><small>Débiteur, créancier, montant, devise, échéance et statut · 2 Mo max.</small></div></div>
+              <div class="netting-drop" id="netting-drop" tabindex="0" role="button"><input id="netting-file" type="file" accept=".csv,text/csv" hidden><span>⇄</span><div><strong>Importer un registre CSV</strong><small>Statut, litige et cession explicites · 500 factures · 2 Mo max. · devises ISO à deux décimales</small></div></div>
               <div class="netting-input-actions"><button class="button primary" id="netting-demo" type="button">Charger le réseau démo</button><button class="button ghost" id="netting-template" type="button">Télécharger le modèle CSV</button></div>
               <div class="netting-source" id="netting-source"><span>i</span><p>Aucun registre chargé. La démonstration contient cinq factures éligibles et une facture en litige.</p></div>
             </article>
@@ -247,7 +254,7 @@
               <article class="metric"><span>Volume brut éligible</span><strong id="netting-gross">—</strong><small id="netting-invoices">0 facture</small></article>
               <article class="metric accent"><span>Volume compensable</span><strong id="netting-offset">—</strong><small id="netting-rate">0 % du volume</small></article>
               <article class="metric"><span>Cash résiduel</span><strong id="netting-residual">—</strong><small>à régler après accord</small></article>
-              <article class="metric"><span>Flux évités</span><strong id="netting-transfers">—</strong><small id="netting-transfer-detail">avant / après</small></article>
+              <article class="metric"><span>Flux évitables simulés</span><strong id="netting-transfers">—</strong><small id="netting-transfer-detail">avant / après</small></article>
             </div>
 
             <div class="netting-results-grid">
@@ -257,6 +264,7 @@
 
             <article class="panel residual-panel"><div class="panel-head"><div><span class="section-label">Paiements restants</span><h3>Flux résiduels</h3></div><span id="netting-ignored" class="status-badge prepared">0 facture exclue</span></div><div class="residual-list" id="netting-residuals"></div></article>
             <p class="netting-disclaimer">Simulation indicative : SettleMesh ne constate pas l’extinction juridique des créances, ne détient aucun fonds et n’initie aucun paiement. Un accord multipartite et une validation comptable, fiscale et juridique restent nécessaires.</p>
+            <div id="netting-exclusions" class="panel" aria-live="polite"></div>
           </div>
         </section>
 

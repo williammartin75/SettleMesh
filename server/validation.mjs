@@ -9,6 +9,7 @@ import {
   validateInvoice
 } from "../web/core.js";
 import { parseSvrl } from "../web/svrl.js";
+import { validateServerXsd } from "./xsd.mjs";
 
 class StrictDomParser extends DOMParser {
   constructor() {
@@ -68,10 +69,14 @@ export async function validateApiInvoice(payload) {
   let result = validateInvoice({ ...invoice, container: "XML", originalFileName: safeSourceName }, profile);
   const reports = [];
   try {
+    const structural = await validateServerXsd(xml, invoice);
+    if (!structural.metadata.xsdValid) return appendValidationChecks(result, structural.checks, { ...structural.metadata, en16931: null, peppol: null, officialFailures: null, complete: false });
     reports.push(await transform(xml, invoice.syntax === "UBL" ? STYLESHEETS.ubl : STYLESHEETS.cii, "EN 16931 v1.3.16", "en16931"));
     const isPeppol = invoice.syntax === "UBL" && /peppol\.eu|peppol:bis|poacc:billing/i.test(invoice.customizationId || "");
     if (isPeppol) reports.push(await transform(xml, STYLESHEETS.peppol, "Peppol BIS 3.0.21", "peppol"));
-    result = appendValidationChecks(result, reports.flatMap((report) => report.checks), {
+    result = appendValidationChecks(result, [...structural.checks, ...reports.flatMap((report) => report.checks)], {
+      ...structural.metadata,
+      firedRules: reports.reduce((sum, report) => sum + report.firedRules, 0),
       en16931: "1.3.16",
       peppol: isPeppol ? "3.0.21" : null,
       officialFailures: reports.reduce((sum, report) => sum + report.failures, 0),

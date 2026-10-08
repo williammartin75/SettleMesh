@@ -10,9 +10,12 @@ const PROFILE_FIELDS = [
   "companyName", "legalName", "country", "vatId", "peppolId", "routingProvider",
   "acceptedFormats", "acceptedCurrencies",
   "requirePurchaseOrder", "requireBuyerReference", "requireEndpoint", "requireAttachment",
-  "submissionEmail", "instructions"
+  "submissionEmail", "instructions", "usageMetricsConsent"
 ];
 const SEARCH_MINIMIZED_FIELDS = ["companyName", "legalName", "country", "vatId", "peppolId", "acceptedFormats", "acceptedCurrencies"];
+const BOOLEAN_FIELDS = new Set(["requirePurchaseOrder", "requireBuyerReference", "requireEndpoint", "requireAttachment", "usageMetricsConsent"]);
+const ARRAY_FIELDS = new Set(["acceptedFormats", "acceptedCurrencies"]);
+const invalidProfile = () => Object.assign(new Error("Champs du profil invalides ou trop longs."), { code: "INVALID_REQUIREMENTS_PAYLOAD", status: 400 });
 
 const cleanText = (value) => String(value ?? "").trim();
 const cleanUpper = (value) => cleanText(value).toUpperCase().replace(/\s+/g, "");
@@ -24,6 +27,9 @@ export function sanitizeRequirementProfile(profile) {
   const clean = {};
   for (const field of PROFILE_FIELDS) {
     if (source[field] === undefined) continue;
+    if (BOOLEAN_FIELDS.has(field) && typeof source[field] !== "boolean") throw invalidProfile();
+    if (ARRAY_FIELDS.has(field) && (!Array.isArray(source[field]) || source[field].length > 10 || source[field].some((item) => typeof item !== "string"))) throw invalidProfile();
+    if (!BOOLEAN_FIELDS.has(field) && !ARRAY_FIELDS.has(field) && (typeof source[field] !== "string" || source[field].length > (field === "instructions" ? 4000 : 254))) throw invalidProfile();
     if (Array.isArray(source[field])) {
       clean[field] = [...new Set(source[field].map((item) => cleanUpper(item)))].filter(Boolean);
     } else if (typeof source[field] === "boolean") {
@@ -39,6 +45,7 @@ export function sanitizeRequirementProfile(profile) {
   if (!clean.companyName && !clean.legalName) {
     throw Object.assign(new Error("Un profil publié doit porter un nom d'entreprise."), { code: "INVALID_REQUIREMENTS_PAYLOAD", status: 400 });
   }
+  if (clean.acceptedFormats?.some((value) => !["UBL", "CII", "FACTUR-X"].includes(value)) || clean.acceptedCurrencies?.some((value) => !/^[A-Z]{3}$/.test(value))) throw invalidProfile();
   return clean;
 }
 
@@ -52,7 +59,7 @@ const PROFILE_DEFAULTS = {
   companyName: "", legalName: "", country: "", vatId: "", peppolId: "", routingProvider: "",
   acceptedFormats: [], acceptedCurrencies: [],
   requirePurchaseOrder: false, requireBuyerReference: false, requireEndpoint: false, requireAttachment: false,
-  submissionEmail: "", instructions: ""
+  submissionEmail: "", instructions: "", usageMetricsConsent: false
 };
 const normalizedSide = (profile) => {
   const clean = sanitizeRequirementProfile(profile && typeof profile === "object" ? profile : {});
@@ -150,7 +157,8 @@ export function createSupabaseRequirements({ projectRef, serviceKey, fetchImpl =
           requireEndpoint: Boolean(clean.requireEndpoint),
           requireAttachment: Boolean(clean.requireAttachment),
           submissionEmail: clean.submissionEmail || "",
-          instructions: clean.instructions || ""
+          instructions: clean.instructions || "",
+          usageMetricsConsent: clean.usageMetricsConsent === true
         },
         published: Boolean(published),
         version,
@@ -193,13 +201,15 @@ export function createSupabaseRequirements({ projectRef, serviceKey, fetchImpl =
     async search(query) {
       const q = cleanText(query);
       if (!q) throw Object.assign(new Error("Une recherche exige un mot-clé (raison sociale, TVA ou identifiant Peppol)."), { code: "INVALID_REQUIREMENTS_QUERY", status: 400 });
+      if (q.length > 80 || /[\u0000-\u001f]/.test(q)) throw Object.assign(new Error("Recherche limitée à 80 caractères imprimables."), { code: "INVALID_REQUIREMENTS_QUERY", status: 400 });
+      const quoted = (value) => encodeURIComponent(`"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`);
       // toute forme nettoyée de numéro intracommunautaire (2 lettres + au moins 5 signes) est traitée comme une TVA
       const cleaned = cleanUpper(q);
       const vat = /^[A-Z]{2}[0-9A-Z]{5,}$/.test(cleaned) ? cleaned : "";
       const conditions = [
-        `company_name.ilike.${encodeURIComponent(`*${q}*`)}`,
+        `company_name.ilike.${quoted(`*${q}*`)}`,
         vat ? `vat_id.eq.${vat}` : null,
-        `peppol_id.eq.${encodeURIComponent(cleanUpper(q))}`
+        `peppol_id.eq.${quoted(cleanUpper(q))}`
       ].filter(Boolean).join(",");
       const response = await request(`/settlemesh_requirements?published=eq.true&or=(${conditions})&select=${ROW_FIELDS.join(",")}&order=company_name&limit=20`);
       const rows = await response.json();
@@ -208,7 +218,7 @@ export function createSupabaseRequirements({ projectRef, serviceKey, fetchImpl =
         for (const field of SEARCH_MINIMIZED_FIELDS) {
           if (record.profile[field] !== undefined) minimized[field] = record.profile[field];
         }
-        return { organizationId: record.organizationId, profile: minimized, published: record.published };
+        return { organizationId: record.organizationId, profile: minimized, published: record.published, checkLink: `#buyer/${encodeURIComponent(record.organizationId)}`, version: record.version };
       });
     },
     async delete(organizationId) {

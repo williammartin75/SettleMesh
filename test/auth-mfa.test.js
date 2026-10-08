@@ -81,6 +81,21 @@ const start = async (store) => {
   return { server, url: `http://127.0.0.1:${address.port}/api/v1/auth` };
 };
 
+test("les codes MFA invalides déclenchent le verrouillage après cinq tentatives", async () => {
+  const { store, secret } = buildStore();
+  const { server, url } = await start(store);
+  try {
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const response = await fetch(`${url}/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "alpha@example.test", password: "MotDePasseFort!2026", code: "invalid" }) });
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get("set-cookie"), null);
+    }
+    const locked = await fetch(`${url}/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "alpha@example.test", password: "MotDePasseFort!2026", code: totpCode(secret) }) });
+    assert.equal(locked.status, 429);
+    assert.equal((await locked.json()).error.code, "LOGIN_LOCKED");
+  } finally { server.close(); }
+});
+
 test("login d'un owner avec MFA : sans code → MFA_REQUIRED ; avec le bon code → 200 ; sans code → pas de cookie", async () => {
   const { store, secret } = buildStore();
   const { server, url } = await start(store);
@@ -141,12 +156,12 @@ test("owner sans MFA actif : login toléré avec drapeau d'enrôlement requis", 
 test("setup → enable → login avec code ; disable exige le mot de passe ; password change et invalide l'ancien", async () => {
   const { store, member } = buildStore({ mfa: false });
   const { server, url } = await start(store);
-  const headers = (cookie) => ({ "Content-Type": "application/json", Cookie: cookie ? `settlemesh_session=${cookie}` : undefined });
+  const headers = (cookie) => ({ "Content-Type": "application/json", "X-SettleMesh-CSRF": "session", Cookie: cookie ? `settlemesh_session=${cookie}` : undefined });
   try {
     const login = await fetch(`${url}/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "alpha@example.test", password: "MotDePasseFort!2026" }) });
     const cookie = login.headers.get("set-cookie").match(/settlemesh_session=([0-9a-f-]{36})/)[1];
 
-    const setup = await fetch(`${url}/mfa/setup`, { method: "POST", headers: headers(cookie), body: "{}" });
+    const setup = await fetch(`${url}/mfa/setup`, { method: "POST", headers: headers(cookie), body: JSON.stringify({ password: "MotDePasseFort!2026" }) });
     assert.equal(setup.status, 200);
     const { secret, otpauthUri } = await setup.json();
     assert.equal(secret.length, 32);
@@ -162,7 +177,14 @@ test("setup → enable → login avec code ; disable exige le mot de passe ; pas
 
     const disableWithoutPassword = await fetch(`${url}/mfa/disable`, { method: "POST", headers: headers(cookie), body: "{}" });
     assert.equal(disableWithoutPassword.status, 401);
-    const disable = await fetch(`${url}/mfa/disable`, { method: "POST", headers: headers(cookie), body: JSON.stringify({ password: "MotDePasseFort!2026" }) });
+    const activeSecret = member.mfa_secret;
+    const reset = await fetch(`${url}/mfa/setup`, { method: "POST", headers: headers(cookie), body: JSON.stringify({ password: "MotDePasseFort!2026" }) });
+    assert.equal(reset.status, 409);
+    assert.equal(member.mfa_enabled, true);
+    assert.equal(member.mfa_secret, activeSecret);
+    const noCsrf = await fetch(`${url}/mfa/disable`, { method: "POST", headers: { Cookie: `settlemesh_session=${cookie}`, "Content-Type": "application/json" }, body: JSON.stringify({ password: "MotDePasseFort!2026", code }) });
+    assert.equal(noCsrf.status, 403);
+    const disable = await fetch(`${url}/mfa/disable`, { method: "POST", headers: headers(cookie), body: JSON.stringify({ password: "MotDePasseFort!2026", code }) });
     assert.equal(disable.status, 200);
     assert.equal((await disable.json()).mfaEnabled, false);
 

@@ -9,3 +9,8 @@ Le navigateur exécute ces artefacts localement ; aucune facture n’est envoyé
 - `pdfjs-dist` (dépendance npm) : lecture locale des pièces jointes PDF Factur-X, sous licence Apache 2.0 ; la licence est copiée dans la distribution.
 
 `npm run build:validator` compile les feuilles XSLT en SEF SaxonJS et copie dans `dist/vendor/` les runtimes navigateur de SaxonJS et PDF.js.
+# XSD / libxml2 ajoutés en 0.24.0
+
+XSD UBL 2.1 : [édition OASIS officielle](https://docs.oasis-open.org/ubl/os-UBL-2.1/xsd/). XSD CII D16B : [dépôt OpenPeppol](https://github.com/OpenPEPPOL/tc434-validation/tree/master/cii/validator/uncefact/data/standard), révision enregistrée dans le manifeste. Mentions de droits d'origine conservées ; URL et SHA-256 de chaque fichier dans `web/validation/xsd/*/manifest.json`.
+
+Runtime [xmllint-wasm 5.3.0](https://github.com/noppa/xmllint-wasm/tree/v5.3.0), libxml2 2.13.8, licence MIT dans `vendor/xmllint-wasm/LICENSE.txt` et `web/vendor/xmllint/LICENSE.txt`. Fichiers navigateur copiés depuis la dépendance verrouillée par `scripts/build-validation-assets.mjs`. Aucun schéma distant résolu à partir d'une facture : actifs locaux seulement, `--nonet`, DOCTYPE refusé.

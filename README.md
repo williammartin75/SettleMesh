@@ -8,15 +8,15 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 
 - configuration de l’entité destinataire, de son numéro de TVA et de son identifiant Peppol ;
 - sélection des formats, devises et références obligatoires ;
-- génération d’un CheckLink autonome et partageable ;
+- liens instantanés autonomes et liens stables `#buyer/<organizationId>` chargeant les exigences publiées courantes ;
 - lecture locale des factures XML UBL/CII, extraction du XML embarqué et précontrôle structurel PDF/A-3 des PDF Factur-X ;
-- exécution locale des règles officielles EN 16931 v1.3.16 pour UBL et CII ;
+- validation XSD locale UBL 2.1 / CII D16B (libxml2 WebAssembly), puis règles officielles EN 16931 v1.3.16 pour UBL et CII ;
 - exécution locale des règles Peppol BIS Billing 3.0.21 pour les documents UBL Peppol ;
 - règles nationales déclaratives, versionnées et sourcées selon le pays du profil de réception — France 1.3.0 (format du numéro de TVA intracommunautaire, clé de contrôle SIREN/SIRET de l'identifiant de routage, contrôle du profil Factur-X reçu, chemin de fer des sous-lignes EXTENDED rapproché du total de lignes, notices réforme et parcours CTC), Allemagne 1.0.0 (format TVA DE et Leitweg-ID en BT-10 sur les XRechnung, clé Mod 97-10) et Belgique 1.0.0 (format TVA BE et communication structurée en BT-83, clé Mod 97) ;
 - vérification à la demande d’un numéro de TVA auprès de VIES, avec résultat horodaté `vérifié`, `non vérifié` ou `indisponible` ;
-- recherche publique et vérification officielle des exigences de réception d'une entreprise, sans compte, à partir de son registre publié (publication opt-in, réponses minimisées) ;
-- interface du registre dans l'app : recherche dans « Sources & règles », publication opt-in depuis « Mon CheckLink » après connexion membre (avec MFA si actif), et bouton « Vérifier ce CheckLink » dans l'aperçu fournisseur ;
-- métriques d'activation **consenties** : une case explicite du profil (`usageMetricsConsent`, défaut désactivé) autorise les fournisseurs qui utilisent le CheckLink à signaler des compteurs anonymes (jour, action, quantité) via `POST /api/v1/metrics/events` — jamais de facture, fournisseur, montant ou identifiant ; sans cette case, zéro octet ne quitte leur navigateur ; lecture agrégée par clé Bearer admin/owner (`GET /api/v1/metrics`, export CSV neutralisé) ;
+- recherche publique et comparaison des exigences de réception, sans compte ; aucune certification d'identité juridique de l'entreprise ;
+- registre : recherche avec ouverture du lien stable, publication depuis « Mon CheckLink » après connexion et invitation préalable ; comparaison visible dans le parcours fournisseur ;
+- compteurs d'usage minimisés : profil publié activé par l'acheteur ET accord distinct du fournisseur, organisation réelle (pas le nom), jeton signé de 5 minutes ; lecture agrégée par clé admin/owner, pagination et export CSV neutralisé ; signaux déclaratifs, pas preuve de traction ;
 - recherche exacte d’un identifiant dans Peppol Directory, avec les mêmes états explicites et sans confusion avec une garantie de joignabilité ;
 - contrôles du destinataire, de la TVA, de l’adresse électronique, du numéro de commande et des totaux ;
 - diagnostic détaillé avec références EN 16931 `BT-*` ;
@@ -34,7 +34,7 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - export JSON volontaire de ces métriques, sans contenu, identifiant, montant ou fournisseur de facture ;
 - interface fournisseur utilisable sans compte ;
 - aucune transmission serveur du contenu des factures depuis l'interface navigateur, aucune télémétrie automatique et aucune persistance dans les APIs pilotes ;
-- la seule collecte serveur existante est la télémétrie d'activation **consentie et anonyme** (0.22.0) : déclenchée uniquement si le profil CheckLink porte le consentement explicite de l'acheteur, réduite à jour + action + quantité, sans contenu de facture ni identifiant personnel ;
+- aucune requête de mesure sans les deux accords ; le corps ne porte aucune donnée de facture mais le transport transmet les métadonnées réseau usuelles à l'hébergeur, donc aucun anonymat absolu promis ;
 - transmission minimale du pays et du numéro TVA ou de l’identifiant Peppol uniquement après un clic explicite, le temps d’interroger la source officielle.
 
 Le modèle de menace, l'inventaire des données, la revue OWASP/RGPD préliminaire et les portes de mise en production sont documentés dans [`docs/SECURITY.md`](./docs/SECURITY.md).
@@ -62,7 +62,11 @@ Depuis 0.16.0, les clés s'administrent directement par API avec la matrice de r
 
 Depuis 0.17.0, des **comptes humains** peuvent être créés (`npm run member:add -- <org> <email> [owner|admin|viewer]` — mot de passe fort affiché une seule fois, haché scrypt). Le serveur expose alors `POST /api/v1/auth/login`, `POST /api/v1/auth/logout` et `GET /api/v1/auth/me` avec un cookie `settlemesh_session` `HttpOnly`/`SameSite=Lax` de 24 h (session côté serveur, table Supabase). Depuis 0.18.0, le **MFA propriétaire** (TOTP RFC 6238, sans dépendance) s'active via `/auth/mfa/setup` puis `/auth/mfa/enable` : au login, un compte MFA actif exige un code valide (`401 MFA_REQUIRED`) ; le changement de mot de passe passe par `POST /auth/password`.
 
-Le serveur local expose également `GET /api/v1/health`, `POST /api/v1/validate`, `POST /api/v1/identity/vies` et `POST /api/v1/identity/peppol`. Le contrat, les exemples et les limites de sécurité sont décrits dans [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Le Site publié embarque les deux routes d’identité et, depuis 0.23.0, les routes publiques du registre d’exigences (`GET /api/v1/requirements`, `POST /api/v1/requirements/verify`) et de la mesure consentie (`POST /api/v1/metrics/events`) dans un Worker sans stockage — secrets `SETTLEMESH_SUPABASE_*` du Worker requis, limites par adresse IP ; les mutations authentifiées et l’API de validation de factures restent sur le serveur local. La configuration des clés a trois sources exactement comme implémentées, avec la priorité **fichier de registre (`SETTLEMESH_REGISTRY_FILE`)** > **Supabase (`SETTLEMESH_SUPABASE_*`)** > **`SETTLEMESH_API_KEYS`** (mémoire du processus) : les deux premières persistent hashes SHA-256, rôles `owner`/`admin`/`viewer`, révocation appliquée à chaud (`401 API_KEY_REVOKED`) et quotas. Avant toute exposition Internet, un gestionnaire de secrets, TLS, des contrôles d'infrastructure et un pentest externe restent nécessaires.
+Le serveur local expose santé, validation XML, identité, membres et registre. Le Worker `0.24.0` expose identité, recherche, résolution des liens stables, comparaison, mesure d'usage et publication authentifiée. Il utilise l'identité Sites (connexion ChatGPT) puis vérifie une invitation explicite dans `settlemesh_members` : être connecté ne suffit pas. Le serveur local conserve son mécanisme mot de passe/MFA ; aucun mot de passe SettleMesh n'est demandé sur le Worker. La validation XML API et l'administration des clés restent locales. Secrets `SETTLEMESH_SUPABASE_*` requis côté serveur ; sans eux, les fonctions de base répondent explicitement indisponibles. Aucune clé dans le navigateur.
+
+La configuration des clés garde la priorité fichier > Supabase > environnement. Les rôles et révocations d'environnement sont conservés ; seul un rôle omis garde le défaut historique owner. Voir [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Schéma reproductible : [`migrations/001_pilot.sql`](./migrations/001_pilot.sql), à appliquer consciemment dans la base dédiée, jamais automatiquement. Le trigger de versions atomiques n'est actif qu'après application de cette migration. Audit externe, purge, chiffrement des secrets TOTP locaux et supervision restent des portes de production.
+
+Vérification reproductible : `npm ci`, `npm test`, `npm run check`, `npm run build:site`, `git diff --check` ; GitHub Actions exécute ces contrôles à chaque push/PR. Les schémas XSD et leurs empreintes sont vendorizés ; `scripts/fetch-xsd-assets.mjs` est une acquisition explicite depuis OASIS/OpenPeppol, pas une étape réseau pendant un contrôle. `npm run build:validator` reconstruit les moteurs locaux, y compris le WebAssembly.
 
 ## Démonstration
 
@@ -79,11 +83,13 @@ Dans **Mon CheckLink**, le profil peut être exporté en JSON puis réimporté d
 
 La **Vue d'ensemble** contient aussi un bloc « Mesure pilote ». Ses compteurs sont enregistrés dans le navigateur, séparément de l'historique limité à 100 résultats. Ils peuvent être exportés volontairement en JSON ou remis à zéro sans supprimer l'historique. Cet export ne contient pas le XML, les numéros de facture, les fournisseurs, les montants ni les identifiants fiscaux.
 
-Dans **Mon CheckLink**, la case « Mesurer l'activation (consenti) » autorise — et seulement si elle est cochée — les fournisseurs qui utilisent le CheckLink à signaler des compteurs anonymes côté serveur : jour, action (CheckLink copié, facture contrôlée, facture prête) et quantité. Aucun numéro de facture, fournisseur, montant, identifiant fiscal ou adresse IP n'est transmis ou stocké ; l'envoi part uniquement quand le lien décodé porte ce consentement, et zéro octet ne quitte le navigateur fournisseur sinon. Les agrégats se lisent avec une clé admin ou owner : `GET /api/v1/metrics?from=…&to=…` et `GET /api/v1/metrics/export?from=…&to=…` (CSV neutralisé).
+La mesure d'usage nécessite un profil publié qui l'active et la case facultative du fournisseur dans **Tester une facture**. Les anciens liens instantanés ne transmettent aucun événement. Les requêtes utilisent l'organisation du registre et un jeton signé en en-tête ; le serveur vérifie à nouveau publication et activation. Aucun contenu de facture n'est envoyé. Les agrégats se lisent avec une clé admin ou owner : `GET /api/v1/metrics?from=…&to=…` et `/api/v1/metrics/export?from=…&to=…`. Ce sont des événements déclaratifs, reproductibles par un visiteur : ni personnes uniques, ni revenus, ni rejets évités. Une déduplication persistante et une politique de purge restent nécessaires avant usage commercial de ces statistiques.
 
 Dans **Sources & règles**, les contrôles VIES et Peppol Directory sont lancés manuellement. Un état « vérifié » signifie uniquement que la source a répondu positivement à l’instant indiqué. Les identifiants et réponses ne sont pas ajoutés à l’historique SettleMesh ni au stockage du navigateur.
 
 ## SettleMesh Net
+
+Limites : 500 factures et 80 participants, devises ISO à deux décimales uniquement. Référence, devise, statut d'acceptation (`accepted`, `approved`, `accepte[e]`, `approuve[e]`), déclarations `disputed` et `assigned` sont explicites. Un statut `due` ou `validated` seul ne prouve pas l'acceptation. Toute référence dupliquée pour le même créancier est exclue en entier ; chaque exclusion est affichée. Une limite dépassée refuse le fichier entier, sans remplacer le registre courant. Les identités des parties restent déclaratives ; aucun rapprochement juridique automatique par nom.
 
 La page **SettleMesh Net** contient un réseau de démonstration et accepte un registre CSV utilisant les colonnes suivantes :
 
@@ -98,3 +104,5 @@ Cette fonctionnalité est une simulation d’aide à la décision. Elle ne dépl
 ## Périmètre
 
 Les contrôles sont une aide à la préparation et ne constituent ni une certification juridique ni une garantie d'acceptation. Les artefacts EN 16931 et Peppol sont exécutés dans le navigateur, sans envoi de la facture à un serveur. Les règles nationales sont des packs déclaratifs versionnés (module client `web/rules/`), chargés localement, avec source citée et date d'effet ; les packs disponibles aujourd'hui sont France 1.3.0, Allemagne 1.0.0 et Belgique 1.0.0. VIES vérifie ponctuellement un statut TVA ; Peppol Directory indique une présence d’annuaire, pas la joignabilité SMP ni la capacité réelle à recevoir un document donné. Pour Factur-X, le MVP détecte des incohérences structurelles PDF/A-3 visibles mais ne contrôle pas exhaustivement les polices, couleurs, profils ICC, actions et autres règles ISO 19005-3 : veraPDF ou un validateur équivalent reste nécessaire. Les règles nationales supplémentaires ne sont pas encore intégrées.
+
+Revue 0.24.0 : voir le §19 de `PROJECT_DASHBOARD.md` pour les correctifs, tests et limites. Le Site reste privé par décision explicite : un testeur EWOR doit être invité via Sites. La connexion de la base hébergée n'est pas présumée autorisée ; tant qu'elle n'est pas configurée, publication/registre/mesure distante restent indisponibles. La démonstration locale et les liens instantanés non authentifiés restent utilisables ; aucune traction n'est présentée comme acquise.

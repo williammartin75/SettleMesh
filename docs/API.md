@@ -107,11 +107,13 @@ alter table public.settlemesh_members
 
 Endpoints (session requise) :
 
+Chaque mutation d'authentification hors login (y compris logout) exige `X-SettleMesh-CSRF: session`. Le contrôle CSRF est indépendant du mot de passe et du code MFA.
+
 | Opération | Effet |
 |---|---|
-| `POST /auth/mfa/setup` | génère un secret (Base32, 20 octets) + URI `otpauth://` ; stocké **inactif** jusqu'à la validation |
+| `POST /auth/mfa/setup` `{password}` | mot de passe actuel requis ; si MFA déjà active, 409 et aucun remplacement ; sinon secret inactif jusqu'à validation |
 | `POST /auth/mfa/enable` `{code}` | vérifie le code (fenêtre ±1 pas) puis active le MFA |
-| `POST /auth/mfa/disable` `{password}` | désactive le MFA (mot de passe du compte requis) |
+| `POST /auth/mfa/disable` `{password, code}` | mot de passe et code MFA actuel requis si protection active |
 | `POST /auth/password` `{currentPassword, newPassword}` | changement de mot de passe authentifié par session |
 
 Au login : un compte avec MFA actif exige un code valide (`401 MFA_REQUIRED` sans code) ; un owner sans MFA actif se connecte avec `mfaEnrollmentRequired: true` (rattrapage affiché, sans promesse de durée). Depuis 0.21.0, **5 tentatives infructueuses par IP et e-mail sous 10 minutes déclenchent un verrouillage de 10 minutes** (`429 LOGIN_LOCKED`, réinitialisé au succès, réponse distincte du message identifiants) ; le QR code n'est pas rendu : saisie manuelle du secret dans l'application d'authentification. Toute indisponibilité du stockage reste `503 MEMBERS_UNAVAILABLE`, jamais maquillée en mauvais code.
@@ -154,9 +156,9 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:4173/api/v1/requirements' 
 
 Depuis 0.20.0, les mutations acceptent aussi une **session membre** (cookie `settlemesh_session` de rôle admin/owner) à condition d'un en-tête **`X-SettleMesh-CSRF: session`** — une en-tête personnalisée que ne peut pas forger un site tiers ; toute tentative sans elle répond `403 CSRF_REQUIRED`. L'interface navigateur l'utilise pour publier depuis « Mon CheckLink ».
 
-**Vérification officielle d'un CheckLink** (mitigation de la menace « CheckLink imité ») : `POST /api/v1/requirements/verify` reçoit le profil décodé du fragment (format inchangé) et répond sans compte :
+**Comparaison d'un CheckLink au registre** : `POST /api/v1/requirements/verify` reçoit le profil ; si une organisation de lien stable est présente, elle est utilisée avant les identifiants déclarés. Ce n'est pas une certification d'identité ou d'habilitation juridique :
 
-- `verified` : le profil correspond à la publication officielle de l'organisation ;
+- `verified` : le profil correspond aux déclarations publiées dans le registre ;
 - `mismatch` : l'organisation est publiée mais le profil diverge (les noms des champs divergents sont listés) ;
 - `not_published` : l'organisation a des exigences mais ne les a pas publiées ;
 - `unknown` : aucune exigence connue pour cette organisation.
@@ -179,9 +181,9 @@ create table if not exists public.settlemesh_metrics(
 alter table public.settlemesh_metrics enable row level security;
 ```
 
-**Invariants de la collecte** : consentie, minimisée, anonyme. Chaque événement est une ligne append-only `organisation, jour, action, quantité 1` — **jamais** de numéro de facture, fournisseur, montant, identifiant fiscal, XML, adresse IP ni identifiant de session ; la ligne ne peut pas être rattachée à une facture ni à une personne.
+**Invariants de la collecte** : minimisée et facultative. Chaque ligne porte `organisation, jour, action, quantité 1`, sans identifiant ou contenu de facture ni IP/session applicative. Les métadonnées réseau sont néanmoins reçues par l'hébergeur. Pas de garantie d'anonymat absolu, pas de preuve de clients uniques, de revenus ou de rejets évités ; signaux déclaratifs potentiellement répétés.
 
-**Consentement** : porté par le profil de réception (`usageMetricsConsent`, booléen, défaut absent = aucun envoi). Il voyage dans le fragment CheckLink ; la page fournisseur ne signale un événement QUE si le profil décodé du lien porte le consentement — sinon zéro octet ne quitte le navigateur (invariant testé par interception fetch).
+**Accords distincts** : l'acheteur active `usageMetricsConsent` sur un profil publié et le fournisseur coche la case facultative de mesure. L'organisation vient de la résolution du lien stable, jamais du slug du nom. Un en-tête `X-SettleMesh-Metrics-Token` contient un jeton HMAC signé, lié à l'organisation et expirant en 5 minutes ; le serveur revérifie publication et activation. Les anciens liens ne transmettent aucun événement. Sans les deux accords, aucune requête de mesure ; les contrôles explicites VIES/registre ont leurs propres flux. Les jetons limitent la falsification d'organisation, pas la répétition d'événements par un visiteur.
 
 **Envoi** — `POST /api/v1/metrics/events`, same-origin, sans compte, limité par la limite IP générale :
 
@@ -321,6 +323,8 @@ Invoke-RestMethod `
 
 ## Résultats métier
 
+Depuis 0.24.0 : namespaces racine obligatoires, validation XSD UBL 2.1/CII D16B locale via libxml2-WASM avant Schematron, et rapport SVRL avec `fired-rule` obligatoire. `standards.xsd`, `xsdValid`, `firedRules` précisent la portée. XSD invalide = résultat bloqué, aucun Schematron exécuté ; moteur indisponible = avertissement, jamais prêt. Les variantes CII/Factur-X plus récentes non couvertes par D16B ne sont pas certifiées.
+
 - `ready` : aucune erreur ni aucun avertissement ;
 - `review` : aucun blocage, mais au moins un avertissement ;
 - `blocked` : au moins une erreur.
@@ -364,17 +368,18 @@ Une réponse normalisée utilise toujours l’un des trois états suivants :
 
 Pour Peppol, la réponse peut aussi contenir le pays, la date d’inscription et le nombre de types de documents déclarés. Elle n’expose pas les contacts ni la liste brute des capacités. Une présence dans le Directory n’est ni une preuve de joignabilité SMP ni une garantie de livraison.
 
-## Routes publiques du Worker publié (0.23.0)
+## Routes du Worker 0.24.0
 
-Le Worker publié sert, même origine que le Site, trois routes publiques **sans compte**, en parité exacte avec le serveur Node — mêmes listes blanches, mêmes verdicts, mêmes formes de réponse :
+Le Worker sert les routes ci-dessous sur la même origine, sans compte acheteur supplémentaire mais dans l'audience Sites privée. Listes blanches et logique de comparaison partagées avec Node :
 
 | Route | Méthode | Limite par IP | Détail |
 |---|---|---|---|
 | `/api/v1/requirements?q=…` | GET | 30/min | Recherche des exigences **publiées uniquement** (raison sociale, TVA intracommunautaire, identifiant Peppol) ; réponses minimisées (sans courriel de soumission ni instructions) |
-| `/api/v1/requirements/verify` | POST | 20/min | Vérification officielle d'un CheckLink contre les exigences publiées : verdicts `verified`, `mismatch`, `not_published`, `unknown` ; corps ≤ 32 Ko |
-| `/api/v1/metrics/events` | POST | 30/min | Événement de mesure **consenti** : `{ organizationId, action, day }` exactement, tout autre champ ignoré et jamais transporté ; jour futur rejeté ; réponse `202` |
+| `/api/v1/requirements/verify` | POST | 20/min | Comparaison des exigences déclarées : `verified`, `mismatch`, `not_published`, `unknown` ; corps ≤ 32 Ko |
+| `/api/v1/requirements/public/<org>` | GET | 30/min | Profil publié courant ; brouillon ou dépublication = 404 ; token uniquement si mesure activée |
+| `/api/v1/metrics/events` | POST | 30/min | Double accord + jeton signé ; organisation publiée activée ; corps minimisé, date calendrier réelle ; 202 n'atteste pas une facture réelle |
 
-Configuration : secrets du Worker `SETTLEMESH_SUPABASE_PROJECT_REF` et `SETTLEMESH_SUPABASE_SERVICE_KEY` (jamais dans le dépôt). Sans secrets, les routes répondent `503 REQUIREMENTS_UNAVAILABLE` ou `METRICS_UNAVAILABLE` — jamais un succès maquillé. Le Worker reste sans stockage : les tables `settlemesh_requirements` et `settlemesh_metrics` vivent dans le projet Supabase. Les mutations authentifiées (publication, administration, validation de factures) restent sur le serveur Node : le Worker répond `405` avec la frontière explicite.
+Configuration : secrets Worker `SETTLEMESH_SUPABASE_PROJECT_REF` et `SETTLEMESH_SUPABASE_SERVICE_KEY`. Aucun secret dans les actifs navigateur. Sans configuration, 503. `POST/PATCH/DELETE /requirements` sont aussi servis par le Worker : connexion Sites puis membre préalablement invité, rôle owner/admin, organisation dérivée côté serveur, en-tête CSRF. L'API de validation et l'administration des clés restent Node seulement. Audience actuelle : privée ; seules les personnes autorisées par Sites peuvent accéder, même aux routes dites publiques.
 
 ## Erreurs
 
@@ -429,9 +434,9 @@ Toutes les erreurs suivent ce format :
 - délai amont de 8 secondes et état `unavailable` distinct d’un résultat négatif ;
 - limite Peppol Directory de deux recherches par seconde appliquée au mieux par processus ou isolate ;
 - en-têtes `nosniff`, `no-referrer` et permissions sensibles désactivées ;
-- aucun compte utilisateur, session humaine, interface d'administration navigateur, journal d'audit persistant ni SLA dans cette version locale ; un rôle `owner`/`admin`/`viewer` est rattaché à la clé d'organisation, résolu côté serveur et plaqué par l'API d'administration.
+- comptes locaux scrypt/MFA et sessions serveur ; toutes les mutations de session, hors login, exigent `X-SettleMesh-CSRF: session` ; pas de journal d'audit persistant ni SLA ;
 
-Avant tout déploiement Internet, il faut au minimum basculer le registre des clés sur un stockage chiffré managé (l'adaptateur plateforme managée prévu remplacera le fichier local sans changer le contrat), placer tout secret dans un gestionnaire de secrets, ajouter TLS géré, journal d'audit sans contenu sensible, observabilité, politique de rétention et revue de sécurité.
+Avant exposition Internet de l'API Node, il faut un gestionnaire de secrets, TLS géré, chiffrement des secrets TOTP, invalidation globale des sessions, journal d'audit sans contenu sensible, observabilité, politique de rétention et revue externe. L'adaptateur Supabase existe mais ne ferme pas seul ces portes. Le Worker Sites privé ne publie pas l'API de validation Node.
 
 ## Versionnement
 

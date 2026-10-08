@@ -1,0 +1,28 @@
+{
+  "name": "cii-d16b",
+  "roots": [
+    "CrossIndustryInvoice_100pD16B.xsd"
+  ],
+  "files": [
+    {
+      "path": "CrossIndustryInvoice_100pD16B.xsd",
+      "source": "https://raw.githubusercontent.com/OpenPEPPOL/tc434-validation/b89b7c6a2b1f28a80afebbff77f02e739aea32fd/cii/validator/uncefact/data/standard/CrossIndustryInvoice_100pD16B.xsd",
+      "sha256": "b9798aafcba039d0630f0015ffae5092a1758bf924d19d97b6bf0bf9d95f22a0"
+    },
+    {
+      "path": "CrossIndustryInvoice_QualifiedDataType_100pD16B.xsd",
+      "source": "https://raw.githubusercontent.com/OpenPEPPOL/tc434-validation/b89b7c6a2b1f28a80afebbff77f02e739aea32fd/cii/validator/uncefact/data/standard/CrossIndustryInvoice_QualifiedDataType_100pD16B.xsd",
+      "sha256": "a39e0662c31fbdca22237118d6b6bbfa16f69efbd1ee5b23787366349c5b924d"
+    },
+    {
+      "path": "CrossIndustryInvoice_UnqualifiedDataType_100pD16B.xsd",
+      "source": "https://raw.githubusercontent.com/OpenPEPPOL/tc434-validation/b89b7c6a2b1f28a80afebbff77f02e739aea32fd/cii/validator/uncefact/data/standard/CrossIndustryInvoice_UnqualifiedDataType_100pD16B.xsd",
+      "sha256": "5d4ce8a6445caa4b7691f6fba6ad08e312e6a853cd3a422666d121ee2d13ef8c"
+    },
+    {
+      "path": "CrossIndustryInvoice_ReusableAggregateBusinessInformationEntity_100pD16B.xsd",
+      "source": "https://raw.githubusercontent.com/OpenPEPPOL/tc434-validation/b89b7c6a2b1f28a80afebbff77f02e739aea32fd/cii/validator/uncefact/data/standard/CrossIndustryInvoice_ReusableAggregateBusinessInformationEntity_100pD16B.xsd",
+      "sha256": "cc682d67791ffe16c45320619ff089a1c8f3ad22691fc426e4056f2e67909fe0"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { parseSvrl } from "./svrl.js";
+import { validateBrowserXsd } from "./xsd.js";
 
 let saxonPromise;
 
@@ -29,6 +30,8 @@ async function transform(xmlText, stylesheet, label, prefix) {
 }
 
 export async function validateEuropeanStandard(xmlText, invoice) {
+  const structural = await validateBrowserXsd(xmlText, invoice);
+  if (!structural.metadata.xsdValid) return { checks: structural.checks, metadata: { ...structural.metadata, en16931: null, peppol: null, officialFailures: null, complete: false } };
   const enStylesheet = invoice.syntax === "UBL"
     ? "./validation/en16931-ubl-1.3.16.sef.json"
     : "./validation/en16931-cii-1.3.16.sef.json";
@@ -41,8 +44,11 @@ export async function validateEuropeanStandard(xmlText, invoice) {
   }
 
   return {
-    checks: reports.flatMap((report) => report.checks),
+    checks: [...structural.checks, ...reports.flatMap((report) => report.checks)],
     metadata: {
+      ...structural.metadata,
+      complete: true,
+      firedRules: reports.reduce((sum, report) => sum + report.firedRules, 0),
       en16931: "1.3.16",
       peppol: isPeppol ? "3.0.21" : null,
       officialFailures: reports.reduce((sum, report) => sum + report.failures, 0)

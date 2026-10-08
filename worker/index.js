@@ -1,12 +1,14 @@
 import { IdentityInputError, verifyPeppol, verifyVies } from "./identity.mjs";
 import { createSupabaseRequirements, sanitizeRequirementProfile, verifyAgainstPublished } from "./requirements.mjs";
 import { createSupabaseMetrics, validateMetricEvent, METRICS_SCHEMA } from "./metrics.mjs";
+import { issueMetricsToken, authorizeMetricEvent } from "./telemetry.mjs";
+import { requireSiteMembership } from "./membership.mjs";
 
 const API_VERSION = "v1";
 
 const MAX_BODY_BYTES = 4 * 1024;
 const SECURITY_HEADERS = {
-  "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Resource-Policy": "same-origin",
   "X-Frame-Options": "DENY",
@@ -32,7 +34,8 @@ function consumeRate(key, limit = 30, windowMs = 60_000) {
 }
 
 function json(status, body) {
-  return new Response(JSON.stringify(body), {
+  const envelope = { ...(body?.error ? { schema: "settlemesh-api-error" } : {}), apiVersion: API_VERSION, requestId: crypto.randomUUID(), ...body };
+  return new Response(JSON.stringify(envelope), {
     status,
     headers: { ...SECURITY_HEADERS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
   });
@@ -116,7 +119,10 @@ export async function requirementsVerifyRoute(request, env, { requestId = crypto
   try {
     const payload = await readSmallJson(request, 32 * 1024);
     const clean = sanitizeRequirementProfile(payload?.profile || payload);
-    const row = await store.findByIdentifier({ vatId: clean.vatId, peppolId: clean.peppolId, companyName: clean.companyName || clean.legalName });
+    const organizationId = payload?.profile?.organizationId;
+    const row = /^[a-z0-9][a-z0-9_-]{1,63}$/.test(organizationId || "")
+      ? await store.findByOrganization(organizationId)
+      : await store.findByIdentifier({ vatId: clean.vatId, peppolId: clean.peppolId, companyName: clean.companyName || clean.legalName });
     const verdict = verifyAgainstPublished(clean, row);
     return json(200, {
       schema: "settlemesh-requirements-verify", apiVersion: API_VERSION, requestId, stored: false,
@@ -141,12 +147,44 @@ export async function metricsEventRoute(request, env, { requestId = crypto.rando
   try {
     const payload = await readSmallJson(request, MAX_BODY_BYTES);
     const event = validateMetricEvent(payload);
+    await authorizeMetricEvent(event, request.headers.get("x-settlemesh-metrics-token"), serviceKey, createSupabaseRequirements({ projectRef, serviceKey, fetchImpl }));
     await store.insert(event);
     return json(202, { schema: METRICS_SCHEMA, apiVersion: API_VERSION, requestId, accepted: true, event });
   } catch (error) {
     if (error?.code === "METRICS_UNAVAILABLE") return storeUnavailable(requestId, error.code, "La mesure consentie est momentanément indisponible. Réessayez.");
     return routeError(requestId, error, "INVALID_METRICS_PAYLOAD", "Événement de mesure illisible.");
   }
+}
+
+export async function publicProfileRoute(url, env, { fetchImpl = fetch } = {}) {
+  try {
+    const organizationId = url.pathname.slice("/api/v1/requirements/public/".length);
+    if (!/^[a-z0-9][a-z0-9_-]{1,63}$/.test(organizationId)) return json(400, { error: { code: "INVALID_ORGANIZATION", message: "Identifiant invalide." } });
+    const store = createSupabaseRequirements({ ...supabaseEnv(env), fetchImpl });
+    const record = await store.findByOrganization(organizationId);
+    if (!record?.published) return json(404, { error: { code: "PROFILE_NOT_PUBLISHED", message: "Ce profil n'est pas publié." } });
+    const metricsToken = record.profile.usageMetricsConsent === true ? await issueMetricsToken(organizationId, env.SETTLEMESH_SUPABASE_SERVICE_KEY) : null;
+    return json(200, { schema: "settlemesh-public-profile", ...record, metricsToken });
+  } catch (error) { return routeError(crypto.randomUUID(), error, "REQUIREMENTS_UNAVAILABLE", "Registre indisponible."); }
+}
+
+export async function memberRoute(request, env, { fetchImpl = fetch } = {}) {
+  try {
+    const member = await requireSiteMembership(request, env, { fetchImpl });
+    const url = new URL(request.url);
+    if (url.pathname === "/api/v1/auth/me" && request.method === "GET") return json(200, { schema: "settlemesh-session", authentication: "sites", organizationId: member.organizationId, member: { role: member.role } });
+    if (!["POST", "PATCH", "DELETE"].includes(request.method)) return json(405, { error: { code: "METHOD_NOT_ALLOWED", message: "Méthode indisponible." } });
+    if (request.headers.get("x-settlemesh-csrf") !== "session") return json(403, { error: { code: "CSRF_REQUIRED", message: "En-tête CSRF requis." } });
+    if (!["owner", "admin"].includes(member.role)) return json(403, { error: { code: "FORBIDDEN_ROLE", message: "Publication réservée aux admins et owners." } });
+    const store = createSupabaseRequirements({ ...supabaseEnv(env), fetchImpl });
+    if (request.method === "DELETE") { await store.delete(member.organizationId); return json(200, { schema: "settlemesh-requirements", deleted: true, organizationId: member.organizationId }); }
+    if (!String(request.headers.get("content-type") || "").startsWith("application/json")) return json(415, { error: { code: "UNSUPPORTED_MEDIA_TYPE", message: "Utilisez JSON." } });
+    const payload = await readSmallJson(request, 32 * 1024);
+    if (typeof payload.published !== "boolean") return json(400, { error: { code: "INVALID_REQUIREMENTS_PAYLOAD", message: "Publication explicite requise." } });
+    const record = await store.upsert({ organizationId: member.organizationId, profile: payload.profile, published: payload.published });
+    if (!record) throw Object.assign(new Error("Publication non confirmée par le stockage."), { status: 503 });
+    return json(request.method === "POST" && record.published ? 201 : 200, { schema: "settlemesh-requirements", organizationId: member.organizationId, published: record.published, version: record.version, stored: false, notice: "Exigences mises à jour. Le lien stable charge la version publiée courante." });
+  } catch (error) { return routeError(crypto.randomUUID(), error, "MEMBERS_UNAVAILABLE", "Gestion indisponible."); }
 }
 
 async function serveAsset(request, env) {
@@ -161,6 +199,12 @@ async function serveAsset(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === "/api/v1/auth/me") return memberRoute(request, env);
+    if (url.pathname === "/api/v1/health") return json(200, { status: "ok", version: "0.24.0", authentication: { mode: "sites", members: Boolean(env?.SETTLEMESH_SUPABASE_SERVICE_KEY && env?.SETTLEMESH_SUPABASE_PROJECT_REF) } });
+    if (url.pathname.startsWith("/api/v1/requirements/public/") && request.method === "GET") {
+      if (!consumeRate(`${request.headers.get("cf-connecting-ip") || "unknown"}:public-profile`)) return json(429, { error: { code: "RATE_LIMITED", message: "Trop de requêtes." } });
+      return publicProfileRoute(url, env);
+    }
     if (url.pathname === "/api/v1/identity/vies" || url.pathname === "/api/v1/identity/peppol") {
       const client = request.headers.get("cf-connecting-ip") || "unknown";
       if (!consumeRate(`${client}:${url.pathname}`)) {
@@ -193,8 +237,10 @@ export default {
       return metricsEventRoute(request, env);
     }
     if (url.pathname === "/api/v1/requirements" && request.method !== "GET") {
-      return json(405, { schema: "settlemesh-api-error", error: { code: "METHOD_NOT_ALLOWED", message: "Le Worker publié n'expose que la lecture publique ; les mutations authentifiées (publication, gestion) restent sur le serveur." } });
+      if (!consumeRate(`${request.headers.get("cf-connecting-ip") || "unknown"}:requirements-write`, 10)) return json(429, { error: { code: "RATE_LIMITED", message: "Trop de requêtes." } });
+      return memberRoute(request, env);
     }
+    if (url.pathname.startsWith("/api/")) return json(404, { error: { code: "NOT_FOUND", message: "Route API inconnue ou indisponible sur cette instance." } });
     return serveAsset(request, env);
   }
 };

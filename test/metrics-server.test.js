@@ -7,6 +7,7 @@ import { validateMetricEvent, validateMetricRange, aggregateMetricRows, metricsC
 import { createApiCredential } from "../server/auth.mjs";
 import { writeRegistryFile } from "../server/registry.mjs";
 import { createSettleMeshServer, listen } from "../server/server.mjs";
+import { issueMetricsToken } from "../worker/telemetry.mjs";
 
 const adminKey = createApiCredential({ organizationId: "atelier-nova", keyId: "met-admin", role: "admin" });
 const viewerKey = createApiCredential({ organizationId: "atelier-nova", keyId: "met-viewer", role: "viewer" });
@@ -75,12 +76,13 @@ test("HTTP : l'événement accepté est anonyme, et le stockage indisponible res
     insert: async (event) => { inserted.push(event); return true; },
     range: async () => []
   };
-  const server = createSettleMeshServer({ metricsStoreOption: store });
+  const requirementsStoreOption = { findByOrganization: async () => ({ published: true, profile: { usageMetricsConsent: true } }) };
+  const server = createSettleMeshServer({ metricsStoreOption: store, requirementsStoreOption, metricsSigningSecret: "test-secret-only" });
   const address = await listen(server, { port: 0 });
   const url = `http://127.0.0.1:${address.port}/api/v1/metrics`;
   try {
     const response = await fetch(`${url}/events`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json", "X-SettleMesh-Metrics-Token": await issueMetricsToken("atelier-nova", "test-secret-only") },
       body: JSON.stringify({ organizationId: "atelier-nova", action: "checklink_copied", day: "2026-10-08", invoiceNumber: "F-1", amount: 500 })
     });
     assert.equal(response.status, 202);

@@ -151,6 +151,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .status-badge i { width: 6px; height: 6px; background: currentColor; border-radius: 50%; }
 .link-box { min-width: 0; margin: 22px 0 20px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 11px 12px; border: 1px solid #dfe2e7; background: #f8f9fb; border-radius: 11px; }
 .link-box.compact { display: block; margin: 16px 0 11px; }
+.link-box.compact code { display: block; max-width: 100%; }
 .link-box code { overflow: hidden; color: #525d6d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .link-box button { width: 27px; height: 27px; border: 0; border-radius: 7px; background: #fff; cursor: pointer; }
 .link-lock { color: var(--green); }
@@ -195,6 +196,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .completion-ring strong { font-size: 22px; }
 .completion-ring span { color: var(--muted); font-size: 8px; text-transform: uppercase; }
 .profile-layout { display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 20px; align-items: start; }
+.profile-side { min-width: 0; }
 .form-stack { display: grid; gap: 18px; }
 .form-panel { padding: 29px; }
 .form-section-title { display: flex; gap: 14px; margin-bottom: 25px; }
@@ -222,7 +224,7 @@ fieldset { margin: 0; padding: 0; border: 0; }
 .toggle-row strong, .toggle-row small { display: block; }
 .toggle-row strong { font-size: 10px; }
 .toggle-row small { margin-top: 3px; color: var(--muted-2); font-size: 8px; }
-.toggle-row input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle-row input { position: absolute; width: 1px; height: 1px; padding: 0; opacity: 0; pointer-events: none; }
 .toggle { width: 38px; height: 22px; flex: 0 0 auto; position: relative; border-radius: 12px; background: #dfe3e8; transition: .2s; }
 .toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.15); transition: .2s; }
 .toggle-row input:checked + .toggle { background: var(--ink); }
@@ -475,7 +477,7 @@ body.public-mode .checker-header::before { content: "settlemesh"; position: abso
   .hero-visual { display: none; }
   .metric-grid { grid-template-columns: repeat(2,1fr); }
   .pilot-metrics-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
-  .profile-layout { grid-template-columns: 1fr; }
+  .profile-layout { grid-template-columns: minmax(0,1fr); }
   .sticky-card { position: static; }
   .profile-side { order: -1; }
 }
@@ -567,3 +569,10 @@ body.public-mode .checker-header::before { content: "settlemesh"; position: abso
 .upload-panel.processing .drop-area { opacity: .62; }
 @keyframes settlemesh-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .progress-spinner { animation-duration: 1.8s; } }
+/* Explicit trust and optional supplier consent, also visible in public mode. */
+[hidden] { display: none !important; }
+.checklink-status-panel { margin-bottom: 24px; padding: 20px; }
+.checklink-status-panel p, .visitor-consent, #netting-exclusions p { font-size: 13px; line-height: 1.6; }
+.visitor-consent { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; max-width: 840px; }
+.visitor-consent input { flex: 0 0 16px; width: 16px; height: 16px; padding: 0; margin-top: 4px; }
+.requirement-result { flex-wrap: wrap; gap: 12px; }

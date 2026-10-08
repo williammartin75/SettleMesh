@@ -1,11 +1,13 @@
 const EPSILON = 0.005;
-const ELIGIBLE_STATUSES = new Set(["accepted", "approved", "validated", "due", "acceptee", "accepte", "approuvee", "approuve", "validee", "valide"]);
+const ELIGIBLE_STATUSES = new Set(["accepted", "approved", "acceptee", "accepte", "approuvee", "approuve"]);
 
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const cleanText = (value) => String(value ?? "").trim();
 const partyKey = (value) => cleanText(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ");
 const normalizedHeader = (value) => partyKey(value).replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 const isTrue = (value) => ["1", "true", "yes", "oui", "o", "x"].includes(partyKey(value));
+const booleanFlag = (value) => value === true || isTrue(value) ? true : (value === false || ["0", "false", "no", "non", "n"].includes(partyKey(value)) ? false : null);
+export const MAX_NETTING_OBLIGATIONS = 500;
 
 function normalizeIsoDate(value) {
   const raw = cleanText(value);
@@ -18,7 +20,8 @@ function normalizeIsoDate(value) {
 function parseAmount(value) {
   const raw = cleanText(value).replace(/\s/g, "");
   if (!raw) return NaN;
-  const normalized = raw.includes(",") && !raw.includes(".") ? raw.replace(",", ".") : raw.replace(/,/g, "");
+  const normalized = raw.replace(",", ".");
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return NaN;
   return Number(normalized);
 }
 
@@ -43,6 +46,7 @@ function parseRows(text, delimiter) {
     } else cell += char;
   }
   row.push(cell.replace(/\r$/, ""));
+  if (quoted) throw new Error("CSV invalide : guillemet non fermé.");
   if (row.some((value) => value.trim())) rows.push(row);
   return rows;
 }
@@ -63,10 +67,11 @@ export function parseNettingCsv(text) {
   const firstLine = String(text || "").split(/\r?\n/, 1)[0] || "";
   const delimiter = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ";" : ",";
   const rows = parseRows(text, delimiter);
+  if (rows.length - 1 > MAX_NETTING_OBLIGATIONS) throw new Error("Limite de 500 factures dépassée : aucune ligne n'a été importée.");
   if (rows.length < 2) throw new Error("Le fichier CSV doit contenir un en-tête et au moins une facture.");
   const headers = rows[0].map(normalizedHeader);
   const indexes = Object.fromEntries(Object.entries(HEADER_ALIASES).map(([field, aliases]) => [field, headers.findIndex((header) => aliases.includes(header))]));
-  for (const field of ["invoiceNumber", "debtor", "creditor", "amount", "currency"]) {
+  for (const field of ["invoiceNumber", "debtor", "creditor", "amount", "currency", "status", "disputed", "assigned"]) {
     if (indexes[field] < 0) throw new Error(`Colonne obligatoire absente : ${HEADER_ALIASES[field][0]}.`);
   }
   const obligations = [];
@@ -75,8 +80,8 @@ export function parseNettingCsv(text) {
     const read = (field) => indexes[field] >= 0 ? row[indexes[field]] : "";
     const obligation = normalizeObligation({
       invoiceNumber: read("invoiceNumber"), debtor: read("debtor"), creditor: read("creditor"),
-      amount: read("amount"), currency: read("currency"), dueDate: read("dueDate"), status: read("status") || "accepted",
-      disputed: isTrue(read("disputed")), assigned: isTrue(read("assigned"))
+      amount: read("amount"), currency: read("currency"), dueDate: read("dueDate"), status: read("status"),
+      disputed: booleanFlag(read("disputed")), assigned: booleanFlag(read("assigned"))
     }, rowIndex);
     if (obligation.invoiceNumber && obligation.debtor && obligation.creditor && Number.isFinite(obligation.amount)) obligations.push(obligation);
     else rejected.push({ row: rowIndex + 2, reason: "Référence, débiteur, créancier ou montant invalide." });
@@ -86,10 +91,10 @@ export function parseNettingCsv(text) {
 }
 
 export function normalizeObligation(value, index = 0) {
-  const invoiceNumber = cleanText(value.invoiceNumber || value.invoice || `FACTURE-${index + 1}`);
+  const invoiceNumber = cleanText(value.invoiceNumber || value.invoice);
   const debtor = cleanText(value.debtor);
   const creditor = cleanText(value.creditor);
-  const currency = cleanText(value.currency || "EUR").toUpperCase();
+  const currency = cleanText(value.currency).toUpperCase();
   return {
     id: cleanText(value.id) || `OBL-${index + 1}-${invoiceNumber}`,
     invoiceNumber,
@@ -100,19 +105,22 @@ export function normalizeObligation(value, index = 0) {
     amount: roundMoney(parseAmount(value.amount)),
     currency,
     dueDate: cleanText(value.dueDate),
-    status: partyKey(value.status || "accepted"),
-    disputed: value.disputed === true || isTrue(value.disputed),
-    assigned: value.assigned === true || isTrue(value.assigned)
+    status: partyKey(value.status),
+    disputed: booleanFlag(value.disputed),
+    assigned: booleanFlag(value.assigned)
   };
 }
 
 function eligibilityReason(item) {
+  if (!item.invoiceNumber) return "Référence de facture absente";
   if (!item.debtorKey || !item.creditorKey || item.debtorKey === item.creditorKey) return "Parties invalides ou identiques";
-  if (!Number.isFinite(item.amount) || item.amount <= 0) return "Montant invalide";
+  if (!Number.isFinite(item.amount) || item.amount <= 0 || !Number.isSafeInteger(Math.round(item.amount * 100)) || item.amount > 1_000_000_000) return "Montant invalide ou hors limite (1 milliard)";
   if (!/^[A-Z]{3}$/.test(item.currency)) return "Devise ISO invalide";
+  if (!Intl.supportedValuesOf("currency").includes(item.currency) || new Intl.NumberFormat("en", { style: "currency", currency: item.currency }).resolvedOptions().maximumFractionDigits !== 2) return "Devise hors périmètre : uniquement ISO à deux décimales";
   if (!ELIGIBLE_STATUSES.has(item.status)) return "Facture non acceptée";
   if (item.disputed) return "Facture en litige";
   if (item.assigned) return "Créance déclarée cédée ou affacturée";
+  if (item.disputed === null || item.assigned === null) return "Déclaration de litige ou de cession absente ou inconnue";
   return "";
 }
 
@@ -138,15 +146,21 @@ function leg(edge, from, to, amount, names) {
 }
 
 export function simulateNetting(input, options = {}) {
+  if (!Array.isArray(input)) throw new Error("Le registre doit être une liste de factures.");
+  if (input.length > MAX_NETTING_OBLIGATIONS) throw new Error("Limite de 500 factures dépassée : aucune simulation tronquée.");
   const requestedCutoff = cleanText(options.cutoffDate);
   const cutoffDate = normalizeIsoDate(requestedCutoff);
   if (requestedCutoff && !cutoffDate) throw new Error("Date de cut-off invalide. Utilisez le format AAAA-MM-JJ.");
   const normalized = (Array.isArray(input) ? input : []).map((item, index) => normalizeObligation(item, index));
+  if (new Set(normalized.flatMap((item) => [item.debtorKey, item.creditorKey]).filter(Boolean)).size > 80) throw new Error("Limite de 80 participants dépassée : réduisez le périmètre de simulation.");
   const ignored = [];
   const deferred = [];
   const eligible = [];
+  const counts = new Map();
+  const duplicateKey = (item) => JSON.stringify([item.creditorKey, item.invoiceNumber.toUpperCase()]);
+  normalized.forEach((item) => counts.set(duplicateKey(item), (counts.get(duplicateKey(item)) || 0) + 1));
   normalized.forEach((item) => {
-    const reason = eligibilityReason(item);
+    const reason = counts.get(duplicateKey(item)) > 1 ? "Référence dupliquée pour ce créancier : toutes les occurrences exclues" : eligibilityReason(item);
     if (reason) ignored.push({ ...item, reason });
     else if (cutoffDate && !normalizeIsoDate(item.dueDate)) deferred.push({ ...item, reason: "Échéance absente ou invalide pour ce cut-off" });
     else if (cutoffDate && item.dueDate > cutoffDate) deferred.push({ ...item, reason: "Échéance après le cut-off" });
@@ -229,7 +243,10 @@ export function simulateNetting(input, options = {}) {
     if (!partyItems.length) return [];
     const receivable = roundMoney(partyItems.filter((item) => item.creditorKey === key).reduce((sum, item) => sum + item.amount, 0));
     const payable = roundMoney(partyItems.filter((item) => item.debtorKey === key).reduce((sum, item) => sum + item.amount, 0));
-    return [{ name, currency, receivable, payable, netPosition: roundMoney(receivable - payable) }];
+    const residualNetPosition = roundMoney(partyItems.reduce((sum, item) => sum + (item.creditorKey === key ? item.remainingAmount : -item.remainingAmount), 0));
+    const netPosition = roundMoney(receivable - payable);
+    if (Math.abs(netPosition - residualNetPosition) > EPSILON) throw new Error("Invariant rompu : position nette non préservée.");
+    return [{ name, currency, receivable, payable, netPosition, residualNetPosition }];
   })).sort((a, b) => Math.abs(b.netPosition) - Math.abs(a.netPosition));
 
   return {
@@ -253,7 +270,7 @@ export function createNettingDemo() {
     { invoiceNumber: "INV-AN-1054", debtor: "Atelier Nova", creditor: "TechFlow", amount: 40000, currency: "EUR", dueDate: "2026-11-30", status: "approved" },
     { invoiceNumber: "INV-TF-7780", debtor: "TechFlow", creditor: "Atelier Nova", amount: 25000, currency: "EUR", dueDate: "2026-11-30", status: "approved" },
     { invoiceNumber: "INV-LC-3399", debtor: "LogiCore", creditor: "TechFlow", amount: 18000, currency: "EUR", dueDate: "2026-12-05", status: "disputed", disputed: true }
-  ];
+  ].map((item) => ({ disputed: false, assigned: false, ...item }));
 }
 
 const csvCell = (value) => {

@@ -30,23 +30,23 @@ test("avec consentement, un seul événement anonyme minimal part", async () => 
     return { ok: true, status: 202 };
   };
   const outcome = await reportEvent(
-    { companyName: "Atelier Nova", usageMetricsConsent: true },
+    { companyName: "Atelier Nova", organizationId: "real-org", usageMetricsConsent: true, metricsToken: "signed" },
     "checklink_copied",
-    { fetchImpl, day: "2026-10-08" }
+    { fetchImpl, day: "2026-10-08", visitorConsent: true }
   );
   assert.equal(outcome.sent, true);
   assert.equal(calls.length, 1);
   // corps EXACTEMENT { organizationId, action, day } : rien d'autre
-  assert.deepEqual(calls[0].body, { organizationId: "atelier-nova", action: "checklink_copied", day: "2026-10-08" });
+  assert.deepEqual(calls[0].body, { organizationId: "real-org", action: "checklink_copied", day: "2026-10-08" });
   assert.equal(calls[0].url, "/api/v1/metrics/events");
   assert.equal(calls[0].method, "POST");
 });
 
 test("un échec d'envoi ne perturbe jamais l'expérience fournisseur", async () => {
   const outcome = await reportEvent(
-    { companyName: "Atelier Nova", usageMetricsConsent: true },
+    { companyName: "Atelier Nova", organizationId: "real-org", usageMetricsConsent: true, metricsToken: "signed" },
     "invoice_ready",
-    { fetchImpl: async () => { throw new Error("réseau coupé"); } }
+    { fetchImpl: async () => { throw new Error("réseau coupé"); }, visitorConsent: true }
   );
   assert.equal(outcome.sent, false);
   assert.equal(outcome.reason, "unreachable");

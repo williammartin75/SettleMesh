@@ -17,20 +17,29 @@ export const DEFAULT_PROFILE = Object.freeze({
   instructions: "Ajoutez le numéro de commande communiqué par votre contact dans le champ BT-13."
 });
 
+const UBL_BASIC = "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2";
+const UBL_AGGREGATE = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2";
+const CII_RAM = "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100";
+const CII_RSM = "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100";
+const CII_UDT = "urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100";
+const isUblScope = (scope) => String(scope?.namespaceURI || "").startsWith("urn:oasis:names:specification:ubl:");
+const valueNamespace = (scope, localName) => isUblScope(scope) ? UBL_BASIC : localName === "DateTimeString" ? CII_UDT : CII_RAM;
+const aggregateNamespace = (scope, localName) => isUblScope(scope) ? UBL_AGGREGATE : ["ExchangedDocument", "ExchangedDocumentContext", "SupplyChainTradeTransaction"].includes(localName) ? CII_RSM : CII_RAM;
+
 const field = (scope, localName) => {
   if (!scope) return "";
-  const nodes = scope.getElementsByTagNameNS?.("*", localName) || [];
+  const nodes = scope.getElementsByTagNameNS?.(valueNamespace(scope, localName), localName) || [];
   return nodes[0]?.textContent?.trim() || "";
 };
 
 const node = (scope, localName) => {
   if (!scope) return null;
-  return (scope.getElementsByTagNameNS?.("*", localName) || [])[0] || null;
+  return [...(scope.childNodes || [])].find((child) => child.nodeType === 1 && child.localName === localName && child.namespaceURI === aggregateNamespace(scope, localName)) || null;
 };
 
 const directField = (scope, localName) => {
   if (!scope) return "";
-  return [...(scope.childNodes || [])].find((child) => child.nodeType === 1 && child.localName === localName)?.textContent?.trim() || "";
+  return [...(scope.childNodes || [])].find((child) => child.nodeType === 1 && child.localName === localName && child.namespaceURI === valueNamespace(scope, localName))?.textContent?.trim() || "";
 };
 
 const number = (value) => {
@@ -43,7 +52,7 @@ const cleanId = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/
 const textEncoder = new TextEncoder();
 let resultSequence = 0;
 const electronicAddress = (scope, localName) => {
-  const element = node(scope, localName);
+  const element = [...(scope?.childNodes || [])].find((child) => child.nodeType === 1 && child.localName === localName && child.namespaceURI === valueNamespace(scope, localName));
   const value = element?.textContent?.trim() || "";
   const scheme = element?.getAttribute?.("schemeID")?.trim() || "";
   return value && scheme && !value.startsWith(`${scheme}:`) ? `${scheme}:${value}` : value;
@@ -157,6 +166,7 @@ export function parseProfileBundle(value) {
 export function createCheckLink(profile, locationLike = globalThis.location) {
   const origin = locationLike?.origin || "https://settlemesh.example";
   const pathname = locationLike?.pathname || "/";
+  if (profile.published === true && /^[a-z0-9][a-z0-9_-]{1,63}$/.test(profile.organizationId || "")) return `${origin}${pathname}#buyer/${profile.organizationId}`;
   return `${origin}${pathname}#check/${profileSlug(profile.companyName)}/${encodeProfile(profile)}`;
 }
 
@@ -173,10 +183,12 @@ export function parseInvoiceXml(xmlText, Parser = globalThis.DOMParser) {
   const isUbl = rootName === "Invoice" || rootName === "CreditNote";
   const isCii = rootName === "CrossIndustryInvoice";
   if (!isUbl && !isCii) throw new Error(`Format XML non reconnu (${rootName || "racine inconnue"}).`);
+  const namespace = isUbl ? `urn:oasis:names:specification:ubl:schema:xsd:${rootName}-2` : "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100";
+  if (root.namespaceURI !== namespace) throw new Error("L'espace de noms de la facture est absent ou invalide.");
 
   if (isUbl) {
-    const supplier = node(root, "AccountingSupplierParty");
-    const buyer = node(root, "AccountingCustomerParty");
+    const supplier = node(node(root, "AccountingSupplierParty"), "Party");
+    const buyer = node(node(root, "AccountingCustomerParty"), "Party");
     const order = node(root, "OrderReference");
     return {
       syntax: "UBL", documentType: rootName === "CreditNote" ? "Avoir" : "Facture",
@@ -195,7 +207,7 @@ export function parseInvoiceXml(xmlText, Parser = globalThis.DOMParser) {
       taxAmount: number(directField(node(root, "TaxTotal"), "TaxAmount")),
       taxInclusive: number(directField(node(root, "LegalMonetaryTotal"), "TaxInclusiveAmount")),
       payableAmount: number(directField(node(root, "LegalMonetaryTotal"), "PayableAmount")),
-      lineCount: root.getElementsByTagNameNS("*", rootName === "CreditNote" ? "CreditNoteLine" : "InvoiceLine").length,
+      lineCount: [...root.childNodes].filter((child) => child.namespaceURI === UBL_AGGREGATE && child.localName === (rootName === "CreditNote" ? "CreditNoteLine" : "InvoiceLine")).length,
       sourceSize: textEncoder.encode(raw).length, raw
     };
   }
@@ -208,10 +220,10 @@ export function parseInvoiceXml(xmlText, Parser = globalThis.DOMParser) {
   const supplier = node(agreement, "SellerTradeParty");
   const buyer = node(agreement, "BuyerTradeParty");
   const totals = node(settlement, "SpecifiedTradeSettlementHeaderMonetarySummation");
-  const taxRegistration = (party) => [...(party?.getElementsByTagNameNS("*", "SpecifiedTaxRegistration") || [])]
+  const taxRegistration = (party) => [...(party?.getElementsByTagNameNS(CII_RAM, "SpecifiedTaxRegistration") || [])]
     .map((registration) => field(registration, "ID")).find(Boolean) || "";
   // Chemin de fer Factur-X 1.09 EXTENDED : sous-lignes rattachées via ParentLineID
-  const lineItems = [...root.getElementsByTagNameNS("*", "IncludedSupplyChainTradeLineItem")];
+  const lineItems = [...(transaction?.childNodes || [])].filter((child) => child.namespaceURI === CII_RAM && child.localName === "IncludedSupplyChainTradeLineItem");
   const lineEntries = lineItems.map((item) => {
     const lineDocument = node(item, "AssociatedDocumentLineDocument");
     const settlementLine = node(item, "SpecifiedLineTradeSettlement");
@@ -247,7 +259,7 @@ export function parseInvoiceXml(xmlText, Parser = globalThis.DOMParser) {
     lineTotal: number(directField(totals, "LineTotalAmount")), taxExclusive: number(directField(totals, "TaxBasisTotalAmount")),
     taxAmount: number(field(settlement, "TaxTotalAmount")), taxInclusive: number(directField(totals, "GrandTotalAmount")),
     payableAmount: number(directField(totals, "DuePayableAmount")),
-    lineCount: root.getElementsByTagNameNS("*", "IncludedSupplyChainTradeLineItem").length,
+    lineCount: lineItems.length,
     cheminDeFer,
     sourceSize: textEncoder.encode(raw).length, raw
   };

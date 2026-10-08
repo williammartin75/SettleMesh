@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createApiCredential } from "../server/auth.mjs";
 import { writeRegistryFile } from "../server/registry.mjs";
 import { createSettleMeshServer, listen } from "../server/server.mjs";
+import { createDemoXml } from "../web/core.js";
 
 const credentials = [
   createApiCredential({ organizationId: "atelier-nova", keyId: "owner-key", role: "owner" }),
@@ -31,6 +32,17 @@ const call = async (port, path, apiKey, { method = "GET", body } = {}) => {
   });
   return { status: response.status, body: await response.json() };
 };
+
+test("JSON admin malformé : erreur bornée, puis santé et administration toujours disponibles", async () => {
+  const { server, port } = await start();
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1/admin/keys`, { method: "POST", headers: { Authorization: `Bearer ${credentials[0].apiKey}`, "Content-Type": "application/json" }, body: "{broken-json" });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error.code, "INVALID_JSON");
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/health`)).status, 200);
+    assert.equal((await call(port, "keys", credentials[0].apiKey)).status, 200);
+  } finally { server.close(); }
+});
 
 test("la matrice de rôles s'applique aux routes d'administration", async () => {
   const { server, port } = await start();
@@ -64,7 +76,7 @@ test("création, rotation de rôle, révocation et quota passent par le HTTP", a
     const validated = await fetch(`http://127.0.0.1:${port}/api/v1/validate`, {
       method: "POST",
       headers: { Authorization: `Bearer ${created.body.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ xml: "<Invoice/>", sourceName: "test" })
+      body: JSON.stringify({ xml: createDemoXml({ valid: true }), sourceName: "test" })
     });
     assert.equal(validated.status, 200);
     assert.equal((await validated.json()).organizationRole, "viewer");

@@ -7,6 +7,9 @@ export function parseSvrl(serialized, label, prefix, Parser = globalThis.DOMPars
   const report = new Parser().parseFromString(String(serialized || ""), "application/xml");
   const parserErrors = report.getElementsByTagNameNS?.("*", "parsererror") || [];
   if (parserErrors.length) throw new Error(`Le rapport ${label} est illisible.`);
+  if (report.documentElement?.namespaceURI !== SVRL_NS || report.documentElement?.localName !== "schematron-output") throw new Error(`Le rapport ${label} n'est pas un rapport SVRL.`);
+  const firedRules = report.getElementsByTagNameNS(SVRL_NS, "fired-rule").length;
+  if (!firedRules) throw new Error(`Aucune règle ${label} n'a été exécutée : ce rapport ne prouve pas une validation.`);
   const failures = [...report.getElementsByTagNameNS(SVRL_NS, "failed-assert")];
   const checks = failures.slice(0, 24).map((failure, index) => {
     const reference = failure.getAttribute("id") || `${prefix}-${index + 1}`;
@@ -37,5 +40,5 @@ export function parseSvrl(serialized, label, prefix, Parser = globalThis.DOMPars
       message: "Aucune assertion bloquante n’a été trouvée par l’artefact officiel.", fix: "", field: label
     });
   }
-  return { failures: failures.length, checks };
+  return { failures: failures.length, firedRules, checks };
 }

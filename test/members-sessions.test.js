@@ -124,7 +124,7 @@ test("login complet : cookie durci, /me, puis logout efface la session", async (
     assert.equal(meBody.organizationId, "atelier-nova");
     assert.equal(meBody.member.role, "admin");
 
-    const logout = await fetch(`${url}/logout`, { method: "POST", headers: { Cookie: `settlemesh_session=${cookie}` } });
+    const logout = await fetch(`${url}/logout`, { method: "POST", headers: { Cookie: `settlemesh_session=${cookie}`, "X-SettleMesh-CSRF": "session" } });
     assert.equal(logout.status, 200);
     assert.ok((await logout.json()).terminated);
     const clearCookie = logout.headers.get("set-cookie");

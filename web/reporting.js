@@ -1,11 +1,7 @@
-// Signalement d'activation consentie, côté navigateur.
-// INVARIANT ABSOLU : sans consentement explicite porté par le profil
-// (usageMetricsConsent === true), AUCUNE requête n'est déclenchée — zéro
-// octet ne quitte le navigateur. Le corps est exactement
-// { organizationId, action, day } : jamais de contenu de facture,
-// d'identifiant fiscal, de fournisseur, de montant ni d'horodatage fin.
-
-import { profileSlug } from "./core.js";
+// Usage déclaré : accord du visiteur ET activation par l'acheteur publié.
+// Sans ces deux choix, aucune requête de mesure. Le corps ne contient que
+// { organizationId, action, day }, avec un jeton d'organisation en en-tête.
+// Pas de données de facture ; le transport réseau reste visible à l'hébergeur.
 
 const EVENT_ENDPOINT = "/api/v1/metrics/events";
 
@@ -15,17 +11,18 @@ const localDay = () => {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 };
 
-export async function reportEvent(profile, action, { fetchImpl = fetch, day, timeoutMs = 5_000 } = {}) {
-  if (profile?.usageMetricsConsent !== true) return { sent: false, reason: "no-consent" };
-  const organizationId = String(profile.companySlug || profileSlug(profile.companyName) || "").slice(0, 64);
+export async function reportEvent(profile, action, { fetchImpl = fetch, day, timeoutMs = 5_000, visitorConsent = false } = {}) {
+  if (profile?.usageMetricsConsent !== true || visitorConsent !== true) return { sent: false, reason: "no-consent" };
+  const organizationId = String(profile.organizationId || "");
   if (!organizationId) return { sent: false, reason: "no-organization" };
+  if (!profile.metricsToken) return { sent: false, reason: "no-token" };
   const body = { organizationId, action, day: day || localDay() };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(EVENT_ENDPOINT, {
       method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: { Accept: "application/json", "Content-Type": "application/json", "X-SettleMesh-Metrics-Token": profile.metricsToken },
       body: JSON.stringify(body),
       signal: controller.signal
     });

@@ -38,6 +38,7 @@ const request = async (path, { method = "GET", payload, fetchImpl = fetch, timeo
 };
 
 export const searchRequirements = (q, options) => request(`?q=${encodeURIComponent(String(q || ""))}`, options);
+export const resolveRequirements = (organizationId, options) => request(`/public/${encodeURIComponent(organizationId)}`, options);
 export const verifyRequirements = (profile, options) => request("/verify", { method: "POST", payload: { profile }, ...options });
 export const publishRequirements = (profile, { published = true, ...options } = {}) => request("", { method: "POST", payload: { profile, published }, sessionMutation: true, ...options });
 export const unpublishRequirements = (options) => request("", { method: "DELETE", sessionMutation: true, ...options });

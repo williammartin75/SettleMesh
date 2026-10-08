@@ -1,17 +1,19 @@
 // Métriques d'activation consenties, côté serveur (0.22.0).
-// Invariant absolu : chaque ligne d'événement est anonyme et minimisée —
+// Chaque ligne d'événement est minimisée (pas une garantie d'anonymat réseau) —
 // organisation, jour, action, quantité 1. Rien d'autre : jamais de numéro
 // de facture, de fournisseur, de montant, d'identifiant fiscal, de XML,
 // d'adresse IP ou d'identifiant de session dans la table. La ligne ne doit
-// pas pouvoir être rattachée à une facture ni à une personne.
+// pas contenir d'identifiant de facture ou de personne. L'hébergeur reçoit
+// néanmoins les métadonnées réseau usuelles ; ces compteurs sont déclaratifs.
 
 export const METRICS_SCHEMA = "settlemesh-metrics";
 export const METRICS_ACTIONS = Object.freeze(["checklink_copied", "invoice_checked", "invoice_ready"]);
 
-const ORGANIZATION_PATTERN = /^[a-z0-9][a-z0-9-]{1,63}$/;
+const ORGANIZATION_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 92;
 const DAY_MS = 86_400_000;
+const validDay = (day) => DAY_PATTERN.test(day || "") && Number.isFinite(Date.parse(`${day}T00:00:00Z`)) && new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day;
 
 const invalid = (message) => Object.assign(new Error(message), { code: "INVALID_METRICS_PAYLOAD", status: 400 });
 
@@ -26,7 +28,7 @@ export function validateMetricEvent(payload) {
   const day = String(source.day ?? "").trim();
   if (!ORGANIZATION_PATTERN.test(organizationId)) throw invalid("L'identifiant d'organisation attend la forme d'un slug (lettres, chiffres, tirets).");
   if (!METRICS_ACTIONS.includes(action)) throw invalid(`L'action de mesure doit être l'une de : ${METRICS_ACTIONS.join(", ")}.`);
-  if (!DAY_PATTERN.test(day) || Number.isNaN(Date.parse(`${day}T00:00:00Z`))) throw invalid("Le jour attend le format AAAA-MM-JJ.");
+  if (!validDay(day)) throw invalid("Le jour attend une date réelle au format AAAA-MM-JJ.");
   const todayUtc = new Date().toISOString().slice(0, 10);
   if (day > todayUtc && Date.parse(`${day}T00:00:00Z`) - Date.parse(`${todayUtc}T00:00:00Z`) > DAY_MS) {
     throw invalid("Un jour futur ne peut pas être mesuré.");
@@ -38,7 +40,7 @@ export function validateMetricRange(from, to) {
   if (!DAY_PATTERN.test(from || "") || !DAY_PATTERN.test(to || "")) throw Object.assign(new Error("Les bornes from et to attendent le format AAAA-MM-JJ."), { code: "INVALID_METRICS_RANGE", status: 400 });
   const start = Date.parse(`${from}T00:00:00Z`);
   const end = Date.parse(`${to}T00:00:00Z`);
-  if (Number.isNaN(start) || Number.isNaN(end)) throw Object.assign(new Error("Bornes de période illisibles."), { code: "INVALID_METRICS_RANGE", status: 400 });
+  if (!validDay(from) || !validDay(to)) throw Object.assign(new Error("Bornes de période illisibles."), { code: "INVALID_METRICS_RANGE", status: 400 });
   if (start > end) throw Object.assign(new Error("La borne from doit précéder la borne to."), { code: "INVALID_METRICS_RANGE", status: 400 });
   if (end - start > MAX_RANGE_DAYS * DAY_MS) throw Object.assign(new Error(`La période de lecture est limitée à ${MAX_RANGE_DAYS} jours.`), { code: "INVALID_METRICS_RANGE", status: 400 });
   return { from, to };
@@ -49,15 +51,17 @@ export function validateMetricRange(from, to) {
 // n'entre jamais dans la réponse).
 export function aggregateMetricRows(rows, { organizationId, from, to }) {
   const totals = Object.fromEntries(METRICS_ACTIONS.map((action) => [action, 0]));
-  const days = [];
+  const grouped = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
     if (row?.organization_id !== organizationId) continue;
     if (String(row.day) < from || String(row.day) > to) continue;
     if (!METRICS_ACTIONS.includes(row.action)) continue;
     const count = Math.max(0, Math.floor(Number(row.count) || 0));
     totals[row.action] += count;
-    days.push({ day: String(row.day), action: row.action, count });
+    const key = `${row.day}:${row.action}`;
+    grouped.set(key, { day: String(row.day), action: row.action, count: (grouped.get(key)?.count || 0) + count });
   }
+  const days = [...grouped.values()];
   days.sort((left, right) => left.day.localeCompare(right.day) || left.action.localeCompare(right.action));
   return { organizationId, from, to, totals, days };
 }
@@ -106,8 +110,15 @@ export function createSupabaseMetrics({ projectRef, serviceKey, fetchImpl = glob
       return true;
     },
     async range({ organizationId, from, to }) {
-      const response = await request(`/settlemesh_metrics?organization_id=eq.${encodeURIComponent(organizationId)}&day=gte.${encodeURIComponent(from)}&day=lte.${encodeURIComponent(to)}&select=organization_id,day,action,count`);
-      return await response.json();
+      const rows = [];
+      for (let offset = 0; ; offset += 1000) {
+        const response = await request(`/settlemesh_metrics?organization_id=eq.${encodeURIComponent(organizationId)}&day=gte.${encodeURIComponent(from)}&day=lte.${encodeURIComponent(to)}&select=organization_id,day,action,count&order=id&limit=1000&offset=${offset}`);
+        const page = await response.json();
+        if (!Array.isArray(page)) throw restUnavailable("réponse illisible");
+        rows.push(...page);
+        if (page.length < 1000) return rows;
+        if (rows.length >= 100_000) throw restUnavailable("volume trop important : agrégation en base requise, aucun total partiel servi");
+      }
     }
   };
 }

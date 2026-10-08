@@ -14,6 +14,7 @@ import { createFailureTracker } from "./failures.mjs";
 import { createSupabaseMetrics, aggregateMetricRows, metricsCsv, validateMetricEvent, validateMetricRange, METRICS_SCHEMA } from "./metrics.mjs";
 import { validateApiInvoice } from "./validation.mjs";
 import { IdentityInputError, verifyPeppol, verifyVies } from "../worker/identity.mjs";
+import { issueMetricsToken, authorizeMetricEvent } from "../worker/telemetry.mjs";
 
 export const API_VERSION = "v1";
 export const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
@@ -21,11 +22,11 @@ export const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
 const defaultRoot = fileURLToPath(new URL("../web/", import.meta.url));
 const types = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".pdf": "application/pdf"
+  ".json": "application/json; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".wasm": "application/wasm", ".xsd": "application/xml"
 };
 
 const securityHeaders = {
-  "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Resource-Policy": "same-origin",
   "X-Frame-Options": "DENY",
@@ -99,7 +100,7 @@ const membersErrorResponse = (response, requestId, headers, error) => {
     const failure = apiError(requestId, error.code, error.message, 503);
     return jsonResponse(response, 503, failure.body, headers);
   }
-  const status = error?.status || 401;
+  const status = error?.status || error?.statusCode || 401;
   const failure = apiError(requestId, error?.code || "INVALID_CREDENTIALS", error?.message || "Erreur de session.", status);
   return jsonResponse(response, status, failure.body, headers);
 };
@@ -114,7 +115,8 @@ export function createSettleMeshServer({
   requirementsStoreOption = null,
   metricsStoreOption = null,
   cookieSecure = String(process.env.SETTLEMESH_COOKIE_SECURE || "") === "1",
-  identityFetch = fetch
+  identityFetch = fetch,
+  metricsSigningSecret = process.env.SETTLEMESH_SUPABASE_SERVICE_KEY || ""
 } = {}) {
   const normalizedRoot = resolve(root);
   const credentials = parseApiKeyConfiguration(JSON.stringify(apiKeys));
@@ -150,7 +152,7 @@ export function createSettleMeshServer({
   const consumeOrganizationRate = createRateLimiter(60_000);
   const consumePeppolRate = createRateLimiter(1_000);
   const readOptionalJson = async (request) => {
-    if (!Number(request.headers["content-length"] || 0)) return {};
+    if (!Number(request.headers["content-length"] || 0) && !request.headers["transfer-encoding"]) return {};
     return readJson(request);
   };
 
@@ -170,8 +172,7 @@ export function createSettleMeshServer({
 
   const sessionCookieOf = (request) => (request.headers.cookie || "").match(/(?:^|;\s*)settlemesh_session=([0-9a-f-]{36})/i)?.[1] || "";
 
-  return createServer(async (request, response) => {
-    const requestId = randomUUID();
+  const handleRequest = async (request, response, requestId) => {
     const url = new URL(request.url || "/", "http://localhost");
 
     if (url.pathname.startsWith("/api/")) {
@@ -229,6 +230,10 @@ export function createSettleMeshServer({
         }
         const sessionCookie = sessionCookieOf(request);
         const cookieOptions = `Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${cookieSecure ? "; Secure" : ""}`;
+        if (request.method === "POST" && url.pathname !== "/api/v1/auth/login" && request.headers["x-settlemesh-csrf"] !== "session") {
+          const failure = apiError(requestId, "CSRF_REQUIRED", "L'en-tête X-SettleMesh-CSRF est requis.", 403);
+          return jsonResponse(response, 403, failure.body, ipRateHeaders);
+        }
 
         if (url.pathname === "/api/v1/auth/login" && request.method === "POST") {
           try {
@@ -251,6 +256,8 @@ export function createSettleMeshServer({
               return jsonResponse(response, 401, failure.body, ipRateHeaders);
             }
             if (member.mfa_enabled && !verifyTotp(member.mfa_secret || "", payload?.code)) {
+              const attempt = loginFailures.attempt(attemptKey);
+              if (attempt.blocked) return jsonResponse(response, 429, apiError(requestId, "LOGIN_LOCKED", "Trop de tentatives infructueuses.", 429).body, ipRateHeaders);
               const failure = apiError(requestId, "MFA_REQUIRED", "Un code d'authentification valide est requis pour ce compte.", 401);
               return jsonResponse(response, 401, failure.body, ipRateHeaders);
             }
@@ -278,6 +285,9 @@ export function createSettleMeshServer({
             const session = await requireValidSession(membersStore, sessionCookie);
             const member = await membersStore.findMemberById(session.member_id);
             if (!member) throw Object.assign(new Error("Session inconnue ou expirée."), { code: "SESSION_EXPIRED", status: 401 });
+            if (member.mfa_enabled) throw Object.assign(new Error("La protection MFA est déjà active. Aucun secret n'a été remplacé."), { code: "MFA_ALREADY_ENABLED", status: 409 });
+            const payload = await readOptionalJson(request);
+            if (!verifyPassword(payload?.password || "", member.password_hash)) throw Object.assign(new Error("Mot de passe actuel requis."), { code: "INVALID_CREDENTIALS", status: 401 });
             const { secret, otpauthUri } = generateTotpSecret(member.email);
             await membersStore.updateMfa(member.id, { mfaSecret: secret, mfaEnabled: false });
             return jsonResponse(response, 200, {
@@ -324,6 +334,7 @@ export function createSettleMeshServer({
               const failure = apiError(requestId, "INVALID_CREDENTIALS", "Identifiants invalides.", 401);
               return jsonResponse(response, 401, failure.body, ipRateHeaders);
             }
+            if (member.mfa_enabled && !verifyTotp(member.mfa_secret || "", payload?.code)) throw Object.assign(new Error("Code MFA actuel requis."), { code: "MFA_REQUIRED", status: 401 });
             await membersStore.updateMfa(member.id, { mfaSecret: null, mfaEnabled: false });
             return jsonResponse(response, 200, {
               schema: "settlemesh-session", apiVersion: API_VERSION, requestId,
@@ -399,7 +410,10 @@ export function createSettleMeshServer({
         try {
           const payload = await readJson(request);
           const clean = sanitizeRequirementProfile(payload?.profile || payload);
-          const row = await requirementsStore.findByIdentifier({ vatId: clean.vatId, peppolId: clean.peppolId, companyName: clean.companyName || clean.legalName });
+          const organizationId = payload?.profile?.organizationId;
+          const row = /^[a-z0-9][a-z0-9_-]{1,63}$/.test(organizationId || "")
+            ? await requirementsStore.findByOrganization(organizationId)
+            : await requirementsStore.findByIdentifier({ vatId: clean.vatId, peppolId: clean.peppolId, companyName: clean.companyName || clean.legalName });
           const verdict = verifyAgainstPublished(clean, row);
           return jsonResponse(response, 200, {
             schema: "settlemesh-requirements-verify", apiVersion: API_VERSION, requestId, stored: false,
@@ -415,6 +429,15 @@ export function createSettleMeshServer({
         }
       }
 
+      if (url.pathname.startsWith("/api/v1/requirements/public/") && request.method === "GET") {
+        if (!requirementsStore) return jsonResponse(response, 503, apiError(requestId, "REQUIREMENTS_UNAVAILABLE", "Registre indisponible.", 503).body, ipRateHeaders);
+        const organizationId = url.pathname.slice("/api/v1/requirements/public/".length);
+        if (!/^[a-z0-9][a-z0-9_-]{1,63}$/.test(organizationId)) return jsonResponse(response, 400, apiError(requestId, "INVALID_ORGANIZATION", "Identifiant invalide.").body, ipRateHeaders);
+        const record = await requirementsStore.findByOrganization(organizationId);
+        if (!record?.published) return jsonResponse(response, 404, apiError(requestId, "PROFILE_NOT_PUBLISHED", "Ce profil n'est pas publié.", 404).body, ipRateHeaders);
+        const metricsToken = record.profile.usageMetricsConsent === true ? await issueMetricsToken(organizationId, metricsSigningSecret) : null;
+        return jsonResponse(response, 200, { schema: "settlemesh-public-profile", ...record, metricsToken }, ipRateHeaders);
+      }
       if (url.pathname === "/api/v1/requirements" && request.method === "GET") {
         if (!requirementsStore) {
           const failure = apiError(requestId, "REQUIREMENTS_UNAVAILABLE", "Le registre d'exigences n'est pas configuré.", 503);
@@ -484,12 +507,14 @@ export function createSettleMeshServer({
             await requirementsStore.delete(credential.organizationId);
             return jsonResponse(response, 200, { schema: "settlemesh-requirements", apiVersion: API_VERSION, requestId, deleted: true, organizationId: credential.organizationId }, ipRateHeaders);
           }
-          const published = Boolean(payload?.published);
+          if (typeof payload?.published !== "boolean") throw Object.assign(new Error("Publication explicite requise."), { code: "INVALID_REQUIREMENTS_PAYLOAD", status: 400 });
+          const published = payload.published;
           const record = await requirementsStore.upsert({
             organizationId: credential.organizationId,
             profile: payload?.profile || {},
             published
           });
+          if (!record) throw Object.assign(new Error("Publication non confirmée par le stockage."), { code: "REQUIREMENTS_UNAVAILABLE", status: 503 });
           const message = published
             ? "Exigences publiées : cherchables publiquement, sans compte."
             : "Brouillon enregistré : non cherchable tant que published n'est pas true.";
@@ -519,6 +544,7 @@ export function createSettleMeshServer({
         try {
           const payload = await readJson(request);
           const event = validateMetricEvent(payload);
+          await authorizeMetricEvent(event, request.headers["x-settlemesh-metrics-token"], metricsSigningSecret, requirementsStore);
           await metricsStore.insert(event);
           return jsonResponse(response, 202, { schema: METRICS_SCHEMA, apiVersion: API_VERSION, requestId, accepted: true, event }, ipRateHeaders);
         } catch (error) {
@@ -707,6 +733,17 @@ export function createSettleMeshServer({
       response.writeHead(404, { ...securityHeaders, "Content-Type": "text/plain; charset=utf-8" });
       response.end("Not found");
     }
+  };
+  // Never let an asynchronous route rejection escape the HTTP callback.
+  return createServer((request, response) => {
+    const requestId = randomUUID();
+    handleRequest(request, response, requestId).catch((error) => {
+      logger?.error?.(`[${requestId}] request failed`, { code: error?.code || "SERVICE_UNAVAILABLE" });
+      if (response.headersSent) { response.destroy(); return; }
+      const status = error?.statusCode && error.statusCode < 500 ? error.statusCode : 503;
+      const failure = apiError(requestId, status < 500 ? (error.code || "INVALID_REQUEST") : "SERVICE_UNAVAILABLE", status < 500 ? error.message : "Service momentanément indisponible. Réessayez.", status);
+      jsonResponse(response, status, failure.body);
+    });
   });
 }
 

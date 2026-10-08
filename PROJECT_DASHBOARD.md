@@ -7,18 +7,18 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.23.0` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h, cookies durcis et MFA propriétaire TOTP sans dépendance, registre public d'exigences de réception (recherche et vérification de CheckLink sans compte) **et première interface navigateur** (recherche, publication opt-in, bouton de vérification fournisseur), métriques pilote locales **et télémétrie d'activation consentie, minimisée et anonyme** (`/api/v1/metrics`, consentement explicite porté par le profil CheckLink), connecteurs VIES/Peppol sans persistance, **Worker publié servant depuis 0.23.0 les routes publiques du registre d'exigences (recherche, vérification CheckLink) et de la mesure consentie (événements anonymes), sans stockage et fail-closed**, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.24.0` |
+| État | MVP durci : XSD local UBL 2.1/CII D16B, Schematron avec preuve d'exécution ; sécurité rôles/MFA et erreurs serveur ; Net strict avec invariants résiduels ; liens stables, registre utilisable et publication Worker par identité Sites + invitation ; compteurs minimisés à double accord et jeton signé. Pas une production certifiée. |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
-| Hébergement configuré | Worker Sites servant les assets construits, les routes d’identité VIES/Peppol et, depuis 0.23.0, les routes publiques du registre d’exigences (recherche, vérification CheckLink) et de la mesure consentie (événements anonymes) — secrets `SETTLEMESH_SUPABASE_*` du Worker requis ; l’API Node de validation des factures n’est pas déployée |
+| Hébergement configuré | Worker Sites : actifs locaux, identité, registre, liens stables, compteurs et publication protégée. Base distante non configurée au début de la revue : accord de connexion demandé, pas supposé. Audience privée maintenue sur décision de l'utilisateur. Validation et administration des clés Node non déployées. |
 | Langue actuelle | Français |
-| Architecture | HTML, CSS et JavaScript natifs sous `web/` ; Worker sans stockage pour les connecteurs d’identité et les routes publiques du registre et de la mesure (logique partagée dans `worker/`, pattern `identity.mjs`) ; serveur Node local pour l’ensemble de l’API pilote `/api/v1` |
-| Promesse courte | **Rendre les factures conformes avant envoi, puis identifier les paiements qui peuvent être compensés.** |
+| Architecture | HTML/CSS/JS sous `web/`, XSD libxml2-WASM en Worker navigateur, Schematron SaxonJS ; Worker Sites avec identité plateforme + membres Supabase invités ; Node local pour l'API complète. Aucun contenu de facture envoyé depuis le navigateur. |
+| Promesse courte | **Détecter les erreurs de facture avant envoi, puis simuler les flux évitables par compensation. Aucune garantie juridique.** |
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 158 tests au 8 octobre 2026 |
+| Tests automatisés | 180 tests au 8 octobre 2026 ; 20 non-régressions dans `test/hardening.test.js`, dont parcours complet de publication et XML d'extension piégé |
 
 ## 1. Vision et thèse produit
 
@@ -126,15 +126,16 @@ Légende :
 
 | Domaine | Fonction | Statut | Limite ou prochaine condition |
 |---|---|---:|---|
-| Acquisition | CheckLink partageable sans compte fournisseur | Opérationnel | Profil encodé dans le fragment d'URL, pas de gestion centralisée |
+| Acquisition | CheckLink partageable | Partiel hébergé | Lien publié stable `#buyer/org`, version courante résolue en base ; profil local/ancien `#check` = instantané non authentifié. Pas de compte acheteur pour le fournisseur mais audience Sites privée : invitation Sites nécessaire ; base Worker non configurée sans accord. |
 | Profil | Identité, pays, TVA, Peppol, canal | Opérationnel | Pays proposés : FR, BE, DE, NL, LU |
 | Profil | Formats, devises et règles propres à l'acheteur | Opérationnel | Validation de saisie encore légère |
-| Profil | Export/import JSON portable | Opérationnel | Fichier local, pas de gestion de versions distante |
+| Profil | Export/import JSON portable | Opérationnel | Export local ; publications versionnées côté registre, trigger atomique après migration seulement |
 | Facture | Lecture UBL Invoice et CreditNote | Opérationnel | Sous-ensembles testés, pas toutes les variantes nationales |
 | Facture | Lecture CII | Opérationnel | Sous-ensembles testés |
 | Facture | Extraction XML d'un PDF Factur-X | Opérationnel | XML et métadonnées du conteneur traités localement |
 | Facture | Précontrôle structurel PDF/A-3 | Partiel | XMP, profil Factur-X, nom du XML et association `/AF` ; validation ISO exhaustive veraPDF encore absente |
 | Normes | EN 16931 v1.3.16 UBL/CII | Opérationnel | Artefacts à surveiller et mettre à jour |
+| Structure | XSD UBL 2.1 / CII D16B | Opérationnel | 19 schémas embarqués, origines + SHA-256 ; validation locale libxml2-WASM avant Schematron. Ne certifie pas les variantes CII plus récentes ; indisponibilité jamais prête. |
 | Normes | Peppol BIS Billing 3.0.21 | Opérationnel | Déclenché sur les UBL déclarant un profil Peppol |
 | Normes | EN 16931 révisée | Point de veille, à jour | L'artefact de validation EC le plus récent est la 1.3.16 (avril 2026), déjà vendroie et exécutée ; Peppol BIS 3.0.21 (mai 2026) l'intègre également. La révision CEN EN 16931-1:2026 n'a pas encore d'artefacts runtime publiés : surveiller CEN/TC 434 et OpenPeppol |
 | Règles acheteur | Entité, TVA, devise, références, endpoint | Opérationnel | Les règles doivent rester explicables et déterministes |
@@ -143,9 +144,9 @@ Légende :
 | Lots | Jusqu'à 20 fichiers, 20 Mo chacun | Opérationnel | Traitement séquentiel dans le navigateur |
 | Rapports | TXT, JSON et CSV | Opérationnel | Pas de signature ni piste d'audit serveur |
 | Historique | Recherche, filtre, export et suppression locale | Opérationnel | Champs minimisés, 100 résultats et 30 jours maximum dans le navigateur ; diagnostic détaillé limité à la session |
-| Mesure pilote | Compteurs d’activation agrégés, export JSON et remise à zéro | Opérationnel | Stockage local ; **télémétrie serveur consentie, minimisée et anonyme depuis 0.22.0** (`/api/v1/metrics`, consentement explicite porté par le profil, ligne organisation/jour/action/quantité 1) ; aucune ouverture externe des compteurs locaux ni correction inter-session sans consentement ; le Worker publié accepte aussi l'événement depuis 0.23.0 (même liste blanche, sans stockage, limite par IP) |
+| Mesure pilote | Compteurs locaux et signaux d'usage serveur | Partiel | Accord acheteur + fournisseur, organisation du registre, jeton signé 5 min et contrôle publication/activation ; pas une preuve de personnes uniques ou revenus ; métadonnées réseau visibles à l'hébergeur ; déduplication persistante, purge et interface de lecture à construire |
 | Intégration | API de validation `/api/v1` | Partiel | Endpoint local authentifié par clé d'organisation ; secrets, quotas et audit persistants ainsi que déploiement de production absents |
-| Netting | Import CSV d'obligations | Opérationnel | 2 Mo et 500 obligations conservées localement |
+| Netting | Import CSV d'obligations | Opérationnel | 2 Mo, 500 factures, 80 participants ; dépassement refusé sans troncature, statuts et déclarations explicites, doublons exclus ; devises ISO à deux décimales uniquement |
 | Netting | Compensation bilatérale | Opérationnel | Simulation seulement, accord requis |
 | Netting | Cycles triangulaires | Opérationnel | Cycles de trois uniquement |
 | Netting | Isolation par devise | Opérationnel | Aucune conversion de change |
@@ -154,9 +155,9 @@ Légende :
 | Netting | Positions nettes et paiements résiduels | Opérationnel | Aucun ordre de paiement n'est émis |
 | Netting | Export des propositions et allocations | Opérationnel | Document de travail, pas un accord signé |
 | Identité | Registre d'organisations persistant (hashes, rôles, révocation, quotas) | Partiel | Fichier local ou stockage managé Supabase (`SETTLEMESH_SUPABASE_*`), relus sans redémarrage, clés uniquement hashées ; rôles résolus et renvoyés, API d'administration de clés appliquant la matrice owner/admin/viewer (0.16.0) ; revue RGPD externe requise pour des données réelles |
-| Identité | Membres humains, login/logout, sessions et cookies durcis | Partiel | Stockage managé uniquement (e-mail + mot de passe scrypt, sessions 24 h en table, cookie `HttpOnly`/`SameSite=Lax`, badge `members`) ; **MFA propriétaire TOTP actif depuis 0.18.0** (`/auth/mfa/setup` → `/auth/mfa/enable`, code exigé au login, rattrapage affiché pour un owner sans MFA) ; **connexion et publication d'exigences disponibles dans l'interface depuis 0.20.0** (garde CSRF par en-tête) ; pas de réinitialisation de mot de passe ni de rendu QR, revue RGPD externe requise pour des données personnelles réelles (e-mail salarié) |
+| Identité | Membres humains, login/logout, sessions et cookies durcis | Partiel | Node : scrypt, sessions 24 h, MFA avec réinitialisation active refusée, setup par mot de passe, désactivation par mot de passe + code, CSRF sur mutations. Worker : identité Sites + membre préinvité, droits dérivés côté serveur ; être connecté ne suffit pas. Mise en service hébergée dépend de la base et des invitations ; QR, récupération et invalidation globale des sessions absents. |
 | Identité | Comptes, organisations multi-utilisateurs, rôles | Partiel | Comptes humains par e-mail et rôle disponibles en 0.17.0 ; multi-organisation, invitations, changement/oubli de mot de passe et interface de gestion restent à construire |
-| Réseau | Registre public d'exigences de réception (recherche et vérification sans compte) | Partiel | API et stockage actifs (0.19.0), publication opt-in testée, réponses minimisées ; **interface navigateur active depuis 0.20.0** (recherche dans Sources & règles, publication dans Mon CheckLink, bouton « Vérifier ce CheckLink » chez le fournisseur) ; **routes publiques servies aussi par le Worker publié depuis 0.23.0** (recherche et vérification sans compte, sans stockage, fail-closed, parité exacte avec le serveur Node) ; signature du profil pas encore implémentée |
+| Réseau | Registre publié de réception | Partiel | Recherche minimisée avec lien ouvrable, exigences courantes par `#buyer/org`, comparaison visible au fournisseur. Déclarations de membres invités, pas certification d'identité. Audience privée par choix de l'utilisateur ; base Worker à connecter après accord. |
 | Connecteurs | VIES | Opérationnel | Requête explicite sans stockage ; réponse ponctuelle, disponibilité amont et portée juridique limitées |
 | Connecteurs | Peppol Directory | Opérationnel | Recherche exacte limitée à 2/s ; présence d’annuaire distincte de la joignabilité SMP |
 | Connecteurs | PDP/PA et ERP | Prévu | APIs, authentification, quotas et gouvernance à cadrer |
@@ -176,7 +177,7 @@ Rôle : cockpit de l'entreprise destinataire et point d'entrée vers les deux bo
 - taux de complétude du profil ;
 - nombre de contrôles locaux ;
 - nombre et taux de factures prêtes ;
-- nombre d'anomalies évitées ;
+- nombre d'anomalies détectées (aucune preuve de rejet évité) ;
 - impact pilote agrégé : CheckLinks copiés, fichiers soumis, taux analysable, taux prêt et temps moyen ;
 - export JSON volontaire et remise à zéro des métriques locales ;
 - CheckLink copiable ;
@@ -535,7 +536,7 @@ netting
 
 ### 7.2 Modèle de partage CheckLink
 
-Le profil compact est sérialisé en JSON, encodé en UTF-8 puis en Base64 URL-safe dans le fragment `#check/...`. Le fragment n'est normalement pas envoyé au serveur HTTP. L'application passe alors en expérience fournisseur publique et utilise le profil contenu dans le lien.
+Un profil publié produit un lien stable `#buyer/org` : lecture de la publication courante, version affichée et arrêt explicite si publication retirée ou base indisponible. Les profils locaux et anciens liens `#check/...` restent des instantanés Base64 URL-safe non authentifiés, explicitement identifiés ; ils ne déclenchent aucune mesure serveur. Le fragment n'est normalement pas envoyé au serveur HTTP, mais la résolution du lien publié interroge l'organisation du registre. Le parcours est sans compte acheteur supplémentaire ; l'audience Sites reste privée.
 
 Conséquence : toute donnée placée dans le profil est visible par le destinataire du lien. Ne jamais y ajouter de secret, clé API, information bancaire ou donnée confidentielle.
 
@@ -545,6 +546,7 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 - `xslt3 2.7.0` : compilation des artefacts de validation.
 - `pdfjs-dist 6.4.299` : lecture des pièces jointes PDF.
 - `@xmldom/xmldom 0.9.12` : parsing XML dans le runtime Node de l'API.
+- `xmllint-wasm 5.3.0` : validation XSD en worker local, moteur libxml2, WASM et licence vendoriés.
 - Aucun framework frontend.
 - Services externes appelés uniquement à la demande : VIES (`ec.europa.eu`) et Peppol Directory (`directory.peppol.eu`).
 
@@ -552,7 +554,7 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 
 Le serveur local expose `GET /api/v1/health`, `POST /api/v1/validate`, `POST /api/v1/identity/vies` et `POST /api/v1/identity/peppol`. La validation reçoit un JSON contenant le XML, un profil optionnel et un nom de source. Elle exige une clé Bearer dont seul le hash SHA-256 est configuré côté serveur, détermine l'organisation depuis cette clé, puis exécute les contrôles produit, EN 16931 et, si applicable, Peppol. La réponse ne contient pas le XML brut et porte `stored: false`.
 
-Le Worker publié expose les deux routes d’identité et, depuis 0.23.0, trois routes publiques en parité exacte avec le serveur Node : `GET /api/v1/requirements` (recherche des exigences **publiées uniquement**, réponses minimisées), `POST /api/v1/requirements/verify` (verdicts `verified`, `mismatch`, `not_published`, `unknown`) et `POST /api/v1/metrics/events` (événement de mesure consenti, liste blanche `{ organizationId, action, day }`). Toutes sont same-origin, limitées par adresse IP (30/20/30 par minute), sans stockage dans le Worker — les tables `settlemesh_requirements` et `settlemesh_metrics` vivent dans le projet Supabase via les secrets `SETTLEMESH_SUPABASE_*` ; sans secrets, réponse `503` explicite, jamais un succès maquillé. Les mutations authentifiées (publication, administration, validation de factures) restent hors du Worker. Pour l’identité, la réponse normalisée reste `verified`, `not_verified` ou `unavailable`, sans cache de la requête ni de la réponse.
+Le Worker 0.24.0 expose identité, recherche, comparaison, résolution du profil publié et compteurs, ainsi que publication protégée par identité Sites et appartenance préalable. Mêmes listes blanches que Node. Factures locales ; validation API et administration des clés Node seulement. Sans secrets de base, les routes dépendantes de celle-ci répondent 503. Être connecté ChatGPT ne donne pas de droit acheteur. La comparaison du registre ne certifie ni identité ni statut réglementaire.
 
 Limites : corps HTTP de validation de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé la validation reste fermée. Les routes d’identité utilisent un délai amont de 8 secondes ; Peppol est limité au mieux à deux recherches par seconde, conformément à sa documentation publique. Aucun endpoint n’ouvre CORS. Le serveur et le Worker appliquent CSP, anti-frame, `nosniff`, politiques referrer/permissions et isolation cross-origin. Le contrat de référence est `docs/openapi.yaml`.
 
@@ -584,7 +586,7 @@ Depuis la version 0.17.0, des comptes humains existent : `POST /api/v1/auth/logi
 - Une clé API brute ne doit jamais être enregistrée dans le dépôt, le CheckLink, les logs ou une réponse ; seul son hash peut être configuré côté serveur.
 - L'organisation d'une requête API doit être déterminée par le serveur depuis la clé authentifiée, jamais acceptée depuis le corps client.
 - Les exports CSV doivent neutraliser les cellules commençant par `=`, `+`, `-` ou `@`.
-- La télémétrie serveur doit rester consentie, minimisée et anonyme : aucun envoi sans consentement explicite porté par le profil CheckLink, et aucune ligne d'événement ne peut porter de contenu de facture, d'identifiant fiscal, d'adresse IP ou de session.
+- La mesure serveur doit rester facultative et minimisée : accord acheteur sur publication + case fournisseur indépendante, organisation réelle et jeton signé ; aucune requête de mesure sinon. Aucun contenu de facture, identifiant fiscal, IP ou session applicative dans la ligne. L'hébergeur reçoit néanmoins les métadonnées réseau : pas de garantie d'anonymat absolu.
 - Les nouvelles limites de taille doivent être explicites côté interface et code.
 - Aucune donnée sensible ne doit être ajoutée au fragment du CheckLink.
 
@@ -703,7 +705,7 @@ Hypothèses de tarification à tester : abonnement premium plus frais fixe par c
 - incidents de confidentialité ;
 - divergence de position nette, dont la cible est strictement zéro.
 
-Le MVP ne transmet aucune télémétrie **sans consentement**. Depuis 0.22.0, une télémétrie d'activation existe, **consentie, minimisée et anonyme** : l'acheteur coche explicitement « Mesurer l'activation » dans son profil (`usageMetricsConsent`, défaut absent), le consentement voyage dans le fragment CheckLink, et la page fournisseur ne signale que des compteurs `organisation, jour, action, quantité 1` (checklink_copied · invoice_checked · invoice_ready) via `/api/v1/metrics/events` — jamais de numéro de facture, fournisseur, montant, identifiant fiscal, XML, adresse IP ni identifiant de session. Sans consentement, zéro octet ne quitte le navigateur fournisseur (invariant testé par interception fetch). La lecture agrégée exige une clé admin/owner et reste bornée à l'organisation authentifiée ; les compteurs locaux restent à liste blanche, export volontaire et remise à zéro indépendante de l'historique. Toute extension (fournisseurs identifiables, cookies, période sous le jour, tiers) reste hors périmètre sans nouvelle décision.
+La mesure locale et les signaux d'usage serveur sont distincts. Depuis 0.24.0, aucune requête de mesure sans publication activée et choix fournisseur explicite ; organisation issue du registre, jeton signé valable 5 min et contrôle serveur avant insertion. Corps `organisation, jour, action`, ligne quantité 1, jamais de contenu ou identifiant de facture. Les métadonnées réseau reçues par l'hébergeur ne sont pas anonymes. Les événements sont déclaratifs et répétables : pas personnes uniques, revenus ou rejets évités. Les anciens liens n'émettent rien. Lecture agrégée Node admin/owner, pagination par 1000 et refus au-delà de 100 000 événements, jamais de résultat partiel silencieux. Déduplication persistante et purge restent à construire. Les compteurs locaux restent exportables et effaçables indépendamment de l'historique.
 
 ## 12. Tests et critères de qualité
 
@@ -718,7 +720,11 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 158 tests
+### 12.2 Couverture actuelle des 180 tests
+
+`test/hardening.test.js` — 20 tests : attribution asynchrone au bon acheteur/règles, namespaces et extension UBL piégés, XSD inconnu/ordre/type, CII du PDF réel, SVRL sans règle, rôles/révocation d'environnement, panne logout, Net ambigu/doublons/capacité et 30 graphes déterministes avec conservation résiduelle/allocations, double accord de mesure, jetons falsifiés/expirés/retirés, pagination >1000, membres Worker/roles/isolation, liens courants et brouillons inaccessibles ; parcours publier → chercher → résoudre → comparer → mesurer → modifier → dépublier. Deux tests supplémentaires dans auth-mfa/registry-admin couvrent le verrouillage sur mauvais codes et JSON admin malformé.
+
+Les listes suivantes décrivent la couverture conservée, ajustée pour les gardes 0.24.0.
 
 `test/worker-requirements.test.js` — 10 tests :
 
@@ -726,13 +732,13 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - sans secrets Worker → `503 REQUIREMENTS_UNAVAILABLE` sans qu'aucune requête ne parte ; stockage amont en panne → `503` explicite, jamais de succès par défaut ;
 - vérification CheckLink : `verified`, `not_published`, `unknown` distingués, et `mismatch` limité aux champs divergents ;
 - événement de mesure : exactement `{ organizationId, action, day }` inséré, aucune donnée de facture transportée ; action inconnue ou jour futur → `400` sans écriture ;
-- `405` / `415` / `413` selon la méthode, le média et la taille ; frontière explicite des mutations authentifiées (405) ;
+- `405` / `415` / `413` selon la méthode, le média et la taille ; mutation anonyme refusée avant stockage (401) ;
 - limite de débit par adresse IP → `429` après 30 recherches en une minute.
 
 `test/reporting-client.test.js` — 3 tests :
 
-- **INVARIANT ABSOLU** : sans consentement (champ absent ou faux), aucune requête n'est déclenchée — zéro octet ne quitte le navigateur fournisseur, y compris pour un lien CheckLink ancien ;
-- avec consentement : un seul événement, corps exactement `{ organizationId, action, day }`, route same-origin `/api/v1/metrics/events` ;
+- **Invariant de mesure** : accord acheteur et fournisseur obligatoires, organisation du registre et jeton signé ; aucune requête de mesure en l'absence d'un choix, ni depuis un ancien lien. Cette règle n'interdit pas les autres appels explicites ni les métadonnées réseau de navigation.
+- avec les deux accords : un événement déclaratif par appel, corps `{ organizationId, action, day }`, jeton signé en en-tête ; pas de déduplication persistante ;
 - un échec d'envoi reste silencieux et ne perturbe jamais l'expérience fournisseur.
 
 `test/metrics-server.test.js` — 7 tests :
@@ -741,7 +747,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - bornes de période : ordre, format, maximum 92 jours ;
 - agrégation par jour et action, lignes d'autres organisations et hors période ignorées ;
 - export CSV neutralisé (`=`, `+`, `-`, `@` préfixés) ;
-- HTTP : événement accepté 202 anonyme, stockage absent → `503 METRICS_UNAVAILABLE` explicite ;
+- HTTP : événement accepté 202 minimisé, stockage absent → `503 METRICS_UNAVAILABLE` ; jeton absent/falsifié/expiré ou publication inactive → 403 ;
 - HTTP : lecture `403 FORBIDDEN_ROLE` pour un viewer, isolation stricte entre organisations, lignes hors période ignorées ;
 - HTTP : export CSV authentifié (401 sans clé, 403 viewer, 400 sur période invalide).
 
@@ -756,7 +762,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - liste blanche stricte : contenu de facture, d'obligation, secret ou champ inconnu écarté, normalisation vérifiée ;
 - adaptateur : upsert atomique par organisation et recherche filtrée sur `published=eq.true`, minimisation (pas d'e-mail de soumission ni instructions) ;
 - HTTP : publication opt-in explicite, viewer refusé (403), brouillon non cherchable puis cherchable après publication, le tout sans compte pour la recherche ;
-- vérification officielle : `verified`/`mismatch` (noms de champs divergents)/`not_published`/`unknown` distingués, `stored: false` ;
+- comparaison du registre (pas certification d'identité) : `verified`/`mismatch` (noms de champs divergents)/`not_published`/`unknown`, `stored: false` ;
 - l'organisation B écrit toujours dans son propre espace, jamais dans celui de l'organisation A ;
 - mutation via session membre : `403 CSRF_REQUIRED` sans l'en-tête `X-SettleMesh-CSRF`, `403 FORBIDDEN_ROLE` pour une session viewer, publication 201 pour un owner avec en-tête CSRF (organisation propre uniquement) ;
 - sans stockage configuré : `503 REQUIREMENTS_UNAVAILABLE` côté public et authentifié ;
@@ -959,9 +965,9 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - basculer le scénario Net entre « toutes les échéances », « cut-off aujourd'hui » et une date personnalisée, et vérifier que les obligations différées restent visibles et que la somme des positions nettes reste nulle ;
 - importer un CSV multidevise ;
 - vérifier qu'une facture litigieuse et une créance cédée sont exclues ;
-- vérification officielle publique d'un CheckLink : publier les exigences d'une organisation puis vérifier `verified`, `mismatch`, `not_published` et `unknown` via `/api/v1/requirements/verify`, sans compte ;
+- comparaison publique d'un CheckLink : exigences publiées → `verified`, divergence → `mismatch`, non publié → `not_published`, introuvable → `unknown` ; ne certifie pas l'identité ;
 - dans l'interface : rechercher une exigence dans « Sources & règles », se connecter en membre puis publier/dépublier, et cliquer « Vérifier ce CheckLink » dans l'aperçu fournisseur ;
-- métriques consenties : cocher « Mesurer l'activation » dans Mon CheckLink, copier le CheckLink, contrôler une facture, puis lire `GET /api/v1/metrics?from=…&to=…` avec une clé admin ; décocher la case, vider le stockage du navigateur et constater (réseau du navigateur) qu'aucun événement ne part ; inspecter la table `settlemesh_metrics` pour vérifier qu'aucune ligne ne porte de donnée de facture ;
+- métriques : publier un profil qui les propose, ouvrir son lien stable, case fournisseur décochée (aucun appel de mesure), puis la cocher et tester ; vérifier organisation réelle, jeton, liste blanche et refus des jetons invalides ; aucune facture en table ; ne pas qualifier ces signaux de traction vérifiée ;
 - tester la navigation clavier et la largeur mobile.
 
 ## 13. Feuille de route ordonnée
@@ -1033,7 +1039,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Métriques pilote interprétées comme audience globale | Moyen | Libellés « local », export volontaire et distinction explicite entre CheckLink copié et ouverture externe non mesurée |
 | Réapparition de l'ancienne marque Eurule | Faible | SettleMesh est la marque mère depuis v0.4 ; les anciens profils et données locales restent importables uniquement pour compatibilité |
 | Compromission ou mauvaise isolation d'une clé API pilote | Critique | Clés fortes, hashes uniquement (jamais en clair), comparaison constante, organisation déterminée côté serveur, rotation, révocation et quotas persistés via le registre fichier 0.14.0 ; ne pas déployer avant gestionnaire de secrets, TLS, chiffrement au repos et pentest externe |
-| CheckLink imité par un tiers malveillant (hameçonnage fournisseur) | Critique | Identité de l'acheteur lisible dans le lien et la page, parcours fournisseur sans compte, sans identifiant ni donnée bancaire ; vérification officielle publique d'un CheckLink contre les exigences publiées depuis 0.19.0 (verified/mismatch/not_published/unknown), **et bouton « Vérifier ce CheckLink » visible du fournisseur depuis 0.20.0** ; menace consignée dans `docs/SECURITY.md` ; signature du profil dans le lien reste à construire et sensibilisation à l'origine du lien à mener |
+| CheckLink imité par un tiers malveillant (hameçonnage fournisseur) | Critique | Bouton de comparaison présent dans la page fournisseur ; liens publiés résolvent la version courante et anciens fragments portent leur statut non authentifié. Membres invités ≠ identité juridique certifiée ; sensibilisation à l'origine et contrôle des invitations restent requis. |
 | Abus des routes publiques du Worker (recherche, vérification, événements de mesure) | Élevé | Limites par adresse IP (30/20/30 par minute), corps bornés (4/32 Ko), listes blanches strictes, jour futur rejeté et `503` explicite sans secrets ; WAF, plafond de table et purge de `settlemesh_metrics` à prévoir avant production |
 
 ## 15. Journal des décisions
@@ -1066,7 +1072,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-08 | Créer le registre public d'exigences de réception (étape 4 du pack) | Permettre à un fournisseur de trouver et vérifier les exigences d'un client sans compte, et réduire la menace « CheckLink imité » par une vérification officielle publique | Table `public.settlemesh_requirements` (RLS sans policy), publication opt-in explicite jamais silencieuse, matrice admin/owner et organisation résolue côté serveur, recherche minimisée sans compte, vérification `verified/mismatch/not_published/unknown` avec format CheckLink inchangé ; interface navigateur de recherche et signature du profil restent à construire |
 | 2026-10-08 | Ouvrir la première interface navigateur du registre (étape 2b-3) | Rendre visible le backend dans le produit : recherche dans Sources & règles, publication opt-in dans Mon CheckLink (session membre), et bouton « Vérifier ce CheckLink » vu du fournisseur | Les mutations par session exigent l'en-tête CSRF `X-SettleMesh-CSRF` (impossible à forger entre sites avec SameSite=Lax), testé au serveur et au client ; le publish UI recharge le profil courant entier (rél. vérifié : 201 puis `verified` en navigateur, 0 erreur console) ; signature du profil du lien reste à construire |
 | 2026-10-08 | Verrouiller progressivement le login (5 échecs / 10 min par IP+e-mail) | Fermer le risque résiduel « brute force ciblé » du modèle de menace avec des moyens locaux, sans introduire d'énumération (message verrouillé distinct du message identifiants) | `429 LOGIN_LOCKED` après 5 échecs, fenêtre 10 min, traqueur en mémoire borné et purge, réinitialisé au succès ; par processus : protection distribuée et retards aléatoires restent à ajouter avant exposition |
-| 2026-10-08 | **Décision de valeurs (au nom de l'humain)** : accepter une télémétrie d'activation consentie, minimisée et anonyme | L'acheteur doit pouvoir voir la valeur réelle de son CheckLink (fournisseurs actifs, factures contrôlées, factures prêtes) sans espionner personne : consentement explicite coché dans le profil, transporté dans le lien, ligne serveur réduite à organisation/jour/action/quantité 1 — rien qui puisse rattacher un événement à une facture ou une personne | `POST /api/v1/metrics/events` (sans compte, liste blanche stricte, jour futur refusé, limite IP) et lecture agrégée admin/owner (`GET /api/v1/metrics`, export CSV neutralisé) ; sans consentement, zéro octet ne quitte le navigateur fournisseur (invariant testé) ; fournisseurs identifiables, cookies de mesure, périodes sous le jour, tiers et interface de lecture restent hors périmètre sans nouvelle décision ; le SQL de la table `public.settlemesh_metrics` reste à exécuter par l'humain |
+| 2026-10-08 | Historique 0.22.0 : première mesure d'usage, remplacée par les gardes 0.24.0 | Aucun consentement ou anonymat ne peut être décidé « au nom de l'humain ». L'ancien opt-in acheteur seul ne constitue pas un accord fournisseur et ne prouve pas une traction | État courant : publication activée + case fournisseur, organisation réelle + jeton signé, signaux minimisés déclaratifs ; pas d'anonymat garanti, purge/déduplication et revue RGPD externes nécessaires. |
 | 2026-10-08 | Servir les routes publiques du registre et de la mesure consentie depuis le Worker publié (étape 7 du pack, volet hébergement) | Rendre le pilote utilisable sans serveur local : un fournisseur doit pouvoir chercher et vérifier des exigences sur l'URL publique, et la mesure consentie doit être collectée depuis le Site publié | Logique partagée dans `worker/requirements.mjs` et `worker/metrics.mjs` (pattern `identity.mjs` : le serveur en reexport, zéro duplication) ; routes `GET /api/v1/requirements`, `POST /api/v1/requirements/verify` et `POST /api/v1/metrics/events` en parité exacte avec le serveur Node ; secrets `SETTLEMESH_SUPABASE_*` du Worker exigés, `503` explicite sinon, jamais de succès maquillé ; mutations authentifiées exclues du Worker (405 avec frontière explicite) ; limites par IP 30/20/30 par minute ; 10 tests `worker-requirements.test.js` |
 
 ## 16. Questions ouvertes à trancher
@@ -1129,3 +1135,37 @@ Une fonctionnalité n'est terminée que si :
 8. ce tableau de bord reflète le nouvel état réel ;
 9. le dépôt ne contient pas de changement accidentel ;
 10. le livrable peut être expliqué en une phrase mesurable.
+
+## 19. Revue technique — tous les points du §2 (0.24.0)
+
+### Périmètre et acceptation
+
+Gate appliqué avant édition : README/dashboard lus, Git initial propre (une révision locale déjà présente, préservée). Modules affectés : contrôle XML/PDF, XSD/SVRL, API Node/auth, publication/recherche/résolution Worker, consentement/agrégats et simulation Net. Données : profils, invitations, métriques minimisées et obligations ; exports : diagnostics, CSV Net/métriques, liens stables. Les factures du navigateur ne sont pas transférées.
+
+Critères : structure XML fausse jamais prête ; MFA actif non réinitialisable ; rôles/révocations préservés ; toute panne HTTP répond sans arrêter le serveur ; liens publiés ouvrables et retrait sans faux profil de remplacement ; aucun signal sans double choix/organisation/jeton valides ; aucune compensation d'obligation ambiguë, doublon ou devise inconnue ; positions résiduelles et allocations conservées ; bureau/mobile lisibles ; suite, syntaxe, construction et diff propres.
+
+| Point du §2 | Correction livrée | Preuve / limite |
+|---|---|---|
+| Faux positifs XML | Namespace exact, XSD embarqué UBL/CII, SVRL exécuté obligatoire, arrêt sur XSD invalide | Fixtures valides/invalides et PDF CII testés ; pas certification juridique ni prise en charge exhaustive de tous les profils |
+| Sécurité membres/MFA | CSRF sur mutations, setup actif 409, mot de passe/setup et mot de passe+code/désactivation, échecs MFA comptés | Tests HTTP ; secrets TOTP locaux non chiffrés et invalidation globale des sessions restent des portes de production |
+| Rôles/révocation | Configuration d'environnement conserve viewer/admin/owner et revokedAt | Tests de non-régression ; valeur de rôle inconnue rejetée |
+| Serveur instable | Garde de toutes les promesses HTTP, JSON admin invalide 400, panne logout 503 et détails internes masqués | Test suivi de santé/admin disponibles ; quotas non distribués |
+| Mesure trompeuse | Double choix, organisation réelle, publication activée, jeton signé 5 min, pagination et agrégation ; libellés anomalies détectées/flux évitables simulés | Signaux déclaratifs répétables, pas traction vérifiée ; purge/déduplication à construire |
+| Net ambigu | Référence/devise/acceptation explicites, litige/cession faux, doublons tous exclus, capacité 500/80 sans troncature, positions résiduelles testées | 30 graphes déterministes EUR/USD + cas limites ; noms et déclarations non certifiés ; aucune exécution |
+| Parcours hébergé incomplet | Liens stables, résultats de recherche ouvrables, comparaison fournisseur visible, accès acheteur Sites+invitation et rôle serveur | Parcours intégral testé avec base simulée ; base Worker réelle non connectée sans autorisation ; site privé maintenu |
+| Reproductibilité | Migration SQL versionnée et CI tests/syntaxe/construction | Migration non appliquée automatiquement ; versions atomiques actives seulement après application |
+
+### Invariants contrôlés
+
+- Conformité : artefacts et règles acheteur distingués, aucune promesse de conformité juridique ; erreurs moteur = pas prêt.
+- Confidentialité : facture locale, minimisation, deux choix de mesure et métadonnées réseau explicitement annoncées ; aucun secret dans les assets.
+- Compensation : devises séparées, exclusions explicites, positions et traçabilité conservées ; aucune détention de fonds, initiation de paiement ou extinction automatique ajoutée.
+- Expérience : états chargement/erreur/retrait visibles, ancien instantané identifié, verdict effacé au changement d'acheteur et contexte asynchrone invalidé sur changement de profil ; retour du lien fournisseur au profil local réaffiché correctement. Bureau/mobile contrôlés, consentement et lien long sans débordement ; placeholder XML échappé.
+
+### Validation et exploitation
+
+Validation du 8 octobre 2026 : tests et syntaxe passent ; build XSD/Schematron/runtime réalisé depuis les sources versionnées. Essais navigateur : facture de démonstration valide (100/100), invalide (correction requise), compensation démo (315 000 brut, 260 000 simulé, 55 000 résiduel), mobile et bureau ; console contrôlée. Le parcours publication → recherche → résolution → comparaison → mesure → mise à jour → retrait est testé automatiquement avec stockage simulé, pas prétendu validé sur la base hébergée réelle.
+
+Version 0.24.0 destinée à la publication privée sur le même Site ; la réussite du déploiement est confirmée par Sites, pas présumée par ce document source. Décision humaine : ne pas rendre public. La connexion de la base hébergée et la migration sont des opérations distinctes, non présumées autorisées. Une démo investisseur sans invitation reste donc volontairement impossible ; ni pilotes, ni revenus, ni traction n'ont été inventés.
+
+Fichiers ajoutés : `web/analysis-context.js`, `web/xsd.js`, `server/xsd.mjs`, `worker/membership.mjs`, `worker/telemetry.mjs`, `test/hardening.test.js`, `scripts/check.mjs`, `scripts/fetch-xsd-assets.mjs`, `migrations/001_pilot.sql`, `.github/workflows/verify.yml`, manifests/XSD sous `web/validation/xsd/`, moteur/licence sous `web/vendor/xmllint/` et `vendor/xmllint-wasm/`. 19 empreintes de schémas vérifiées ; téléchargement d'actualisation OASIS interrompu par délai réseau, sans écart d'empreinte ni besoin réseau à la compilation/validation.

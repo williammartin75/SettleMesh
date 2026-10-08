@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createNettingDemo, exportNettingCsv, parseNettingCsv, simulateNetting } from "../web/netting.js";
+import { createNettingDemo, exportNettingCsv, parseNettingCsv, simulateNetting as simulateStrictNetting } from "../web/netting.js";
+const simulateNetting = (rows, options) => simulateStrictNetting(rows.map((row) => ({ disputed: false, assigned: false, ...row })), options);
 
 test("détecte une compensation bilatérale et un cycle triangulaire", () => {
   const result = simulateNetting(createNettingDemo());

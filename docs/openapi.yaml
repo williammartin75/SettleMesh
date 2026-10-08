@@ -1,19 +1,23 @@
 openapi: 3.1.0
 info:
   title: SettleMesh Validation and Identity API
-  version: 1.2.0-pilot
+  version: 0.24.0-pilot
   description: >-
     API pilote authentifiée de prévalidation UBL/CII. Elle n'est pas une certification
     juridique, ne conserve pas les factures et nécessite encore une infrastructure de
     secrets, TLS et audit persistants avant une exposition Internet. Les routes
     d'identité VIES et Peppol ne persistent pas les identifiants ni leurs réponses.
 
-    Les clés proviennent de deux sources équivalentes : la variable SETTLEMESH_API_KEYS
+    Les clés Node proviennent de trois sources : Supabase, un fichier, ou la variable SETTLEMESH_API_KEYS
     (mémoire du processus) ou un fichier de registre pointé par SETTLEMESH_REGISTRY_FILE
     (schéma settlemesh-registry-1 : hashes SHA-256 uniquement, rôles owner/admin/viewer,
     révocation via revokedAt, quotas par organisation). Le fichier de registre est relu à
     chaud : une révocation prend effet sans redémarrage et répond 401 API_KEY_REVOKED.
     La réponse de validation porte le rôle résolu côté serveur sous organizationRole.
+    Le Worker Sites ne sert ni validate ni admin ni login par mot de passe. Pour publier,
+    l'identité Sites doit correspondre à un membre invité ; organisation et rôle sont
+    dérivés côté serveur. Le Site reste privé ; public signifie sans compte acheteur
+    supplémentaire, dans les limites de l'audience Sites. Les factures restent locales.
 servers:
   - url: http://127.0.0.1:4173/api/v1
     description: Serveur local
@@ -105,6 +109,8 @@ paths:
     post:
       operationId: logoutMember
       summary: Terminer la session courante (cookie)
+      parameters:
+        - $ref: '#/components/parameters/SessionCsrf'
       responses:
         '200':
           description: Session supprimée côté serveur
@@ -114,10 +120,15 @@ paths:
                 $ref: '#/components/schemas/SessionResponse'
         '401':
           $ref: '#/components/responses/ApiError'
+        '403':
+          $ref: '#/components/responses/ApiError'
+        '503':
+          $ref: '#/components/responses/ApiError'
   /auth/me:
     get:
       operationId: currentMember
       summary: Session courante (membre, organisation, rôle, expiration)
+      description: Node utilise un cookie ; Worker utilise l'identité Sites et une invitation en base, sans créer de session SettleMesh.
       responses:
         '200':
           description: Session valide
@@ -157,6 +168,10 @@ paths:
       summary: Publier ou mettre à jour les exigences de l'organisation authentifiée (admin/owner, opt-in explicite)
       security:
         - bearerAuth: []
+        - memberSession: []
+      x-sites-authentication: invited-member
+      parameters:
+        - $ref: '#/components/parameters/SessionCsrf'
       requestBody:
         required: true
         content:
@@ -191,6 +206,10 @@ paths:
       summary: Mettre à jour les exigences ou le drapeau published de l'organisation authentifiée
       security:
         - bearerAuth: []
+        - memberSession: []
+      x-sites-authentication: invited-member
+      parameters:
+        - $ref: '#/components/parameters/SessionCsrf'
       requestBody:
         required: true
         content:
@@ -215,6 +234,10 @@ paths:
       summary: Dépublier et supprimer les exigences de l'organisation authentifiée
       security:
         - bearerAuth: []
+        - memberSession: []
+      x-sites-authentication: invited-member
+      parameters:
+        - $ref: '#/components/parameters/SessionCsrf'
       responses:
         '200':
           description: Exigences supprimées
@@ -226,10 +249,38 @@ paths:
           $ref: '#/components/responses/ApiError'
         '403':
           $ref: '#/components/responses/ApiError'
+  /requirements/public/{organizationId}:
+    get:
+      operationId: resolvePublishedProfile
+      summary: Résoudre la version publiée courante d'un lien stable
+      parameters:
+        - name: organizationId
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z0-9][a-z0-9_-]{1,63}$' }
+      responses:
+        '200':
+          description: Profil déclaré publié, version courante ; ne certifie pas l'identité juridique
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema: { const: settlemesh-public-profile }
+                  organizationId: { type: string }
+                  published: { const: true }
+                  version: { type: integer }
+                  profile:
+                    $ref: '#/components/schemas/Profile'
+                  metricsToken: { type: [string, 'null'], description: Jeton signé valable 5 minutes si mesure activée. }
+        '404':
+          $ref: '#/components/responses/ApiError'
+        '503':
+          $ref: '#/components/responses/ApiError'
   /requirements/verify:
     post:
       operationId: verifyCheckLinkRequirements
-      summary: Vérifier publiquement un profil CheckLink décodé contre la publication officielle (sans compte)
+      summary: Comparer un profil CheckLink aux exigences déclarées publiées (pas une certification)
       requestBody:
         required: true
         content:
@@ -250,7 +301,13 @@ paths:
   /metrics/events:
     post:
       operationId: reportMetricEvent
-      summary: Signaler un événement d'activation anonyme (sans compte, consentement porté par le profil CheckLink)
+      summary: Signaler un événement minimisé (accord acheteur et fournisseur, jeton de profil publié)
+      description: Signal déclaratif répétable ; aucune preuve de client unique ou revenu. L'hébergeur reçoit les métadonnées réseau.
+      parameters:
+        - name: X-SettleMesh-Metrics-Token
+          in: header
+          required: true
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -260,12 +317,12 @@ paths:
               additionalProperties: false
               required: [organizationId, action, day]
               properties:
-                organizationId: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,63}$' }
+                organizationId: { type: string, pattern: '^[a-z0-9][a-z0-9_-]{1,63}$' }
                 action: { type: string, enum: [checklink_copied, invoice_checked, invoice_ready] }
                 day: { type: string, format: date }
       responses:
         '202':
-          description: Événement accepté (ligne anonyme organisation/jour/action/quantité 1)
+          description: Événement accepté (ligne minimisée organisation/jour/action/quantité 1)
           content:
             application/json:
               schema:
@@ -282,6 +339,8 @@ paths:
                       action: { type: string }
                       day: { type: string, format: date }
         '400':
+          $ref: '#/components/responses/ApiError'
+        '403':
           $ref: '#/components/responses/ApiError'
         '503':
           $ref: '#/components/responses/ApiError'
@@ -539,7 +598,19 @@ paths:
         '429':
           $ref: '#/components/responses/ApiError'
 components:
+  parameters:
+    SessionCsrf:
+      name: X-SettleMesh-CSRF
+      in: header
+      required: false
+      schema: { const: session }
+      description: Obligatoire pour toute mutation par session ou identité Sites ; non requis pour une clé Bearer Node.
   securitySchemes:
+    memberSession:
+      type: apiKey
+      in: cookie
+      name: settlemesh_session
+      description: Cookie durci du serveur Node seulement.
     bearerAuth:
       type: http
       scheme: bearer
@@ -669,6 +740,8 @@ components:
         requireAttachment: { type: boolean }
         submissionEmail: { type: string }
         instructions: { type: string }
+        organizationId: { type: string, description: Identifiant du lien stable ; ignoré en publication au profit du membre authentifié. }
+        usageMetricsConsent: { type: boolean, default: false }
     ValidationResponse:
       type: object
       required: [schema, apiVersion, requestId, processedAt, organizationId, organizationRole, stored, result]
@@ -710,6 +783,9 @@ components:
             peppol: { type: [string, 'null'] }
             officialFailures: { type: [integer, 'null'] }
             complete: { type: boolean }
+            xsd: { type: string }
+            xsdValid: { type: boolean }
+            firedRules: { type: integer, minimum: 0 }
         invoice:
           type: object
           description: Données structurées extraites, sans XML brut.
@@ -734,6 +810,7 @@ components:
       properties:
         email: { type: string, format: email }
         password: { type: string, minLength: 8, maxLength: 256 }
+        code: { type: string, pattern: '^[0-9]{6}$', description: Obligatoire quand MFA actif. }
     SessionResponse:
       type: object
       required: [schema, apiVersion, requestId]
@@ -771,6 +848,8 @@ components:
                 type: object
                 description: Minimisé — sans e-mail de soumission ni instructions.
               published: { const: true }
+              checkLink: { type: string, description: Fragment stable '#buyer/organisation'. }
+              version: { type: integer }
     RequirementsMutationResponse:
       type: object
       required: [schema, apiVersion, requestId, organizationId, published, stored]
@@ -786,9 +865,9 @@ components:
         stored: { const: false }
     RequirementsPublishRequest:
       type: object
-      required: [profile]
+      required: [profile, published]
       properties:
-        published: { type: boolean, default: false, description: Opt-in explicite ; false = brouillon non cherchable. }
+        published: { type: boolean, description: Booléen obligatoire ; false = brouillon non cherchable. }
         profile:
           $ref: '#/components/schemas/Profile'
     RequirementsVerifyRequest:

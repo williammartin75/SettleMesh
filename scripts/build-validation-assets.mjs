@@ -29,3 +29,7 @@ copyFileSync(resolve(root, "node_modules/pdfjs-dist/build/pdf.worker.mjs"), reso
 copyFileSync(resolve(root, "node_modules/pdfjs-dist/LICENSE"), resolve(browserVendor, "PDFJS-LICENSE.txt"));
 
 console.log("Artefacts EN 16931, Peppol et Factur-X prêts dans web/.");
+const xmlVendor = resolve(browserVendor, "xmllint");
+mkdirSync(xmlVendor, { recursive: true });
+for (const name of ["index-browser.mjs", "xmllint-browser.mjs", "xmllint.wasm"]) copyFileSync(resolve(root, "node_modules/xmllint-wasm", name), resolve(xmlVendor, name));
+copyFileSync(resolve(root, "vendor/xmllint-wasm/LICENSE.txt"), resolve(xmlVendor, "LICENSE.txt"));

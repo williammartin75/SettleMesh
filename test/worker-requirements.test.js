@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import workerDefault, { requirementsSearchRoute, requirementsVerifyRoute, metricsEventRoute } from "../worker/index.js";
 import { METRICS_SCHEMA } from "../worker/metrics.mjs";
+import { issueMetricsToken } from "../worker/telemetry.mjs";
 
 // Routes publiques du Worker publié (0.23.0) : parité exacte avec le serveur
 // Node — mêmes listes blanches, mêmes verdicts, mêmes formes de réponse. Le
@@ -138,10 +139,10 @@ test("événement de mesure : exactement { organizationId, action, day } insér�
   let captured = null;
   const fetchImpl = async (url, init = {}) => {
     if (String(init?.method || "GET").toUpperCase() === "POST") captured = { url: String(url), body: JSON.parse(init.body) };
-    return jsonResponse([], 201);
+    return String(init?.method || "GET").toUpperCase() === "POST" ? jsonResponse([], 201) : jsonResponse([publishedRow({ requirements: { usageMetricsConsent: true } })]);
   };
   const response = await metricsEventRoute(new Request("https://settlemesh.example/api/v1/metrics/events", {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "Content-Type": "application/json", "X-SettleMesh-Metrics-Token": await issueMetricsToken("atelier-nova", ENV.SETTLEMESH_SUPABASE_SERVICE_KEY) },
     body: JSON.stringify({
       organizationId: "atelier-nova", action: "invoice_checked", day: "2026-10-08",
       invoiceNumber: "FA-2026-001", amount: 5000, supplierVat: "DE123456789", xml: "<Invoice/>"
@@ -200,12 +201,11 @@ test("méthodes, médias et tailles refusés : 405, 415 et 413", async () => {
   assert.equal((await oversized.json()).error.code, "BODY_TOO_LARGE");
 });
 
-test("câblage du Worker : mutations authentifiées refusées avec la frontière explicite", async () => {
+test("câblage du Worker : mutation anonyme refusée avant le stockage", async () => {
   const response = await workerDefault.fetch(new Request("https://settlemesh.example/api/v1/requirements", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }), {});
-  assert.equal(response.status, 405);
+  assert.equal(response.status, 401);
   const body = await response.json();
-  assert.equal(body.error.code, "METHOD_NOT_ALLOWED");
-  assert.match(body.error.message, /serveur/);
+  assert.equal(body.error.code, "AUTH_REQUIRED");
 });
 
 test("limites de débit du Worker : recherches répétées depuis une adresse → 429", async () => {

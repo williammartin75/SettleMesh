@@ -77,7 +77,11 @@ export function parseApiKeyConfiguration(raw = process.env.SETTLEMESH_API_KEYS |
     seenKeyIds.add(keyId);
     seenHashes.add(keyHash);
     organizationLimits.set(organizationId, requestsPerMinute);
-    return Object.freeze({ organizationId, keyId, keyHash, role: "owner", requestsPerMinute, revokedAt: null });
+    const role = entry.role ?? "owner";
+    if (!["owner", "admin", "viewer"].includes(role)) throw configurationError(`Rôle invalide pour ${keyId}.`);
+    const revokedAt = entry.revokedAt ?? null;
+    if (revokedAt !== null && (typeof revokedAt !== "string" || !Number.isFinite(Date.parse(revokedAt)))) throw configurationError(`Date de révocation invalide pour ${keyId}.`);
+    return Object.freeze({ organizationId, keyId, keyHash, role, requestsPerMinute, revokedAt });
   });
   return Object.freeze(credentials);
 }

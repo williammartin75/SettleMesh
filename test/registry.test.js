@@ -80,7 +80,7 @@ test("une revocation écrite dans le fichier est appliquée par le serveur sans 
     const response = await fetch(`http://127.0.0.1:${listening.port}/api/v1/validate`, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ xml: "<Invoice/>", sourceName: "test" })
+      body: JSON.stringify({ xml: '<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"/>', sourceName: "test" })
     });
     return { status: response.status, body: await response.json() };
   };
