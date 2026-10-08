@@ -7,6 +7,7 @@ import { authenticateApiKey, parseApiKeyConfiguration } from "./auth.mjs";
 import { createFileRegistry, writeRegistryFile } from "./registry.mjs";
 import { createSupabaseRegistry } from "./registry-supabase.mjs";
 import { createSupabaseMembers, verifyPassword, hashPassword } from "./members.mjs";
+import { createSupabaseRequirements, sanitizeRequirementProfile, verifyAgainstPublished } from "./requirements.mjs";
 import { verifyTotp, generateTotpSecret } from "./totp.mjs";
 import { handleAdminRequest } from "./admin.mjs";
 import { validateApiInvoice } from "./validation.mjs";
@@ -108,6 +109,7 @@ export function createSettleMeshServer({
   apiKeys = parseApiKeyConfiguration(),
   registryFile = process.env.SETTLEMESH_REGISTRY_FILE || "",
   membersStoreOption = null,
+  requirementsStoreOption = null,
   cookieSecure = String(process.env.SETTLEMESH_COOKIE_SECURE || "") === "1",
   identityFetch = fetch
 } = {}) {
@@ -119,6 +121,12 @@ export function createSettleMeshServer({
     : null;
   const membersStore = membersStoreOption || (supabaseRegistry
     ? createSupabaseMembers({
+      projectRef: process.env.SETTLEMESH_SUPABASE_PROJECT_REF,
+      serviceKey: process.env.SETTLEMESH_SUPABASE_SERVICE_KEY
+    })
+    : null);
+  const requirementsStore = requirementsStoreOption || (supabaseRegistry
+    ? createSupabaseRequirements({
       projectRef: process.env.SETTLEMESH_SUPABASE_PROJECT_REF,
       serviceKey: process.env.SETTLEMESH_SUPABASE_SERVICE_KEY
     })
@@ -357,6 +365,106 @@ export function createSettleMeshServer({
 
         const errorNoRoute = apiError(requestId, "METHOD_NOT_ALLOWED", "Utilisez POST /auth/login, POST /auth/logout ou GET /auth/me.", 405);
         return jsonResponse(response, 405, errorNoRoute.body, { ...ipRateHeaders, Allow: "POST, GET" });
+      }
+
+      if (url.pathname === "/api/v1/requirements/verify" && request.method === "POST") {
+        if (!requirementsStore) {
+          const failure = apiError(requestId, "REQUIREMENTS_UNAVAILABLE", "Le registre d'exigences n'est pas configuré.", 503);
+          return jsonResponse(response, 503, failure.body, ipRateHeaders);
+        }
+        try {
+          const payload = await readJson(request);
+          const clean = sanitizeRequirementProfile(payload?.profile || payload);
+          const row = await requirementsStore.findByIdentifier({ vatId: clean.vatId, peppolId: clean.peppolId, companyName: clean.companyName || clean.legalName });
+          const verdict = verifyAgainstPublished(clean, row);
+          return jsonResponse(response, 200, {
+            schema: "settlemesh-requirements-verify", apiVersion: API_VERSION, requestId, stored: false,
+            verdict: verdict.verdict, reason: verdict.reason, ...(verdict.mismatches ? { mismatches: verdict.mismatches } : {})
+          }, ipRateHeaders);
+        } catch (error) {
+          if (error?.code === "REQUIREMENTS_UNAVAILABLE") {
+            const failure = apiError(requestId, error.code, error.message, 503);
+            return jsonResponse(response, 503, failure.body, ipRateHeaders);
+          }
+          const failure = apiError(requestId, error.code || "INVALID_REQUIREMENTS_PAYLOAD", error.message || "Profil du CheckLink illisible.", error.status || 400);
+          return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
+        }
+      }
+
+      if (url.pathname === "/api/v1/requirements" && request.method === "GET") {
+        if (!requirementsStore) {
+          const failure = apiError(requestId, "REQUIREMENTS_UNAVAILABLE", "Le registre d'exigences n'est pas configuré.", 503);
+          return jsonResponse(response, 503, failure.body, ipRateHeaders);
+        }
+        try {
+          const query = url.searchParams.get("q") || "";
+          const results = await requirementsStore.search(query);
+          return jsonResponse(response, 200, {
+            schema: "settlemesh-requirements", apiVersion: API_VERSION, requestId, query, count: results.length, results, stored: false
+          }, ipRateHeaders);
+        } catch (error) {
+          if (error?.code === "REQUIREMENTS_UNAVAILABLE") {
+            const failure = apiError(requestId, error.code, error.message, 503);
+            return jsonResponse(response, 503, failure.body, ipRateHeaders);
+          }
+          const failure = apiError(requestId, error.code || "INVALID_REQUIREMENTS_QUERY", error.message, error.status || 400);
+          return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
+        }
+      }
+
+      if (url.pathname === "/api/v1/requirements" && ["POST", "PATCH", "DELETE"].includes(request.method)) {
+        if (!requirementsStore) {
+          const failure = apiError(requestId, "REQUIREMENTS_UNAVAILABLE", "Le registre d'exigences exige le stockage managé.", 503);
+          return jsonResponse(response, 503, failure.body, ipRateHeaders);
+        }
+        const authentication = await authenticateApiKey(request.headers.authorization, await credentialsSource());
+        if (!authentication.ok) {
+          const error = apiError(requestId, authentication.code, authentication.message, authentication.statusCode);
+          const challenge = authentication.statusCode === 401 ? { "WWW-Authenticate": 'Bearer realm="SettleMesh API"' } : {};
+          return jsonResponse(response, error.status, error.body, { ...ipRateHeaders, ...challenge });
+        }
+        const credential = authentication.credential;
+        if (!["owner", "admin"].includes(credential.role)) {
+          const failure = apiError(requestId, "FORBIDDEN_ROLE", "La publication d'exigences exige le rôle admin ou owner.", 403);
+          return jsonResponse(response, 403, failure.body, ipRateHeaders);
+        }
+        const organizationRate = consumeOrganizationRate(credential.organizationId, credential.requestsPerMinute);
+        if (!organizationRate.allowed) {
+          const error = apiError(requestId, "RATE_LIMITED", "Quota de l'organisation atteint. Réessayez dans une minute.", 429);
+          return jsonResponse(response, 429, error.body, rateHeaders(organizationRate, credential.requestsPerMinute, "organization"));
+        }
+        try {
+          const payload = await readOptionalJson(request);
+          if (request.method === "DELETE") {
+            await requirementsStore.delete(credential.organizationId);
+            return jsonResponse(response, 200, { schema: "settlemesh-requirements", apiVersion: API_VERSION, requestId, deleted: true, organizationId: credential.organizationId }, ipRateHeaders);
+          }
+          const published = Boolean(payload?.published);
+          if (!published && request.method === "POST") {
+            // opt-in explicite : une création sans published:true reste un brouillon cherchable nulle part
+            payload.profile = payload?.profile || {};
+          }
+          const record = await requirementsStore.upsert({
+            organizationId: credential.organizationId,
+            profile: payload?.profile || {},
+            published
+          });
+          const message = published
+            ? "Exigences publiées : cherchables publiquement, sans compte."
+            : "Brouillon enregistré : non cherchable tant que published n'est pas true.";
+          return jsonResponse(response, request.method === "POST" && !published ? 200 : (request.method === "POST" ? 201 : 200), {
+            schema: "settlemesh-requirements", apiVersion: API_VERSION, requestId,
+            organizationId: credential.organizationId, published: Boolean(record?.published),
+            version: record?.version ?? null, notice: message, stored: false
+          }, ipRateHeaders);
+        } catch (error) {
+          if (error?.code === "REQUIREMENTS_UNAVAILABLE") {
+            const failure = apiError(requestId, error.code, error.message, 503);
+            return jsonResponse(response, 503, failure.body, ipRateHeaders);
+          }
+          const failure = apiError(requestId, error.code || "INVALID_REQUIREMENTS_PAYLOAD", error.message || "Profil illisible.", error.status || 400);
+          return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
+        }
       }
 
       if (url.pathname.startsWith("/api/v1/admin/") || url.pathname === "/api/v1/admin") {

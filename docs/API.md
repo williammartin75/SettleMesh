@@ -116,6 +116,51 @@ Endpoints (session requise) :
 
 Au login : un compte avec MFA actif exige un code valide (`401 MFA_REQUIRED` sans code) ; un owner sans MFA actif se connecte avec `mfaEnrollmentRequired: true` (rattrapage affiché, sans promesse de durée). Le QR code n'est pas rendu : saisie manuelle du secret dans l'application d'authentification. Toute indisponibilité du stockage reste `503 MEMBERS_UNAVAILABLE`, jamais maquillée en mauvais code.
 
+### Registre public d'exigences de réception (0.19.0, étape 4 du pack)
+
+Un fournisseur peut trouver et vérifier les exigences d'un client **sans compte**. Table dans **SQL Editor** :
+
+```sql
+create table if not exists public.settlemesh_requirements(
+  id uuid primary key default gen_random_uuid(),
+  organization_id text not null unique,
+  company_name text not null,
+  legal_name text not null,
+  country text not null default '',
+  vat_id text not null default '',
+  peppol_id text not null default '',
+  accepted_formats jsonb not null default '[]',
+  accepted_currencies jsonb not null default '[]',
+  requirements jsonb not null default '{}',
+  version integer not null default 1,
+  published boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.settlemesh_requirements enable row level security;
+```
+
+**Invariant central** : rien n'est cherchable sans publication explicite (`published: true` opt-in, jamais silencieuse).
+
+Recherche publique sans compte : `GET /api/v1/requirements?q=<raison sociale | TVA | identifiant Peppol>` — seuls les profils publiés répondent, réponses minimisées (sans e-mail de soumission ni instructions).
+
+Publication (authentification Bearer, rôle admin ou owner, organisation résolue côté serveur — une clé de l'organisation A ne peut jamais publier pour l'organisation B) :
+
+```powershell
+Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:4173/api/v1/requirements' -Headers @{ Authorization = "Bearer sm_live_…" } -ContentType 'application/json' -Body '{"published":true,"profile":{"companyName":"Atelier Nova","legalName":"Atelier Nova SAS","country":"FR","vatId":"FR11123456782","peppolId":"0009:123456782","acceptedFormats":["UBL"],"acceptedCurrencies":["EUR"],"requirePurchaseOrder":true,"requireEndpoint":true,"submissionEmail":"factures@example.test","instructions":"Commande dans BT-13."}}'
+```
+
+`PATCH /api/v1/requirements` (mise à jour ou changement de `published`), `DELETE /api/v1/requirements` (dépublication/suppression). La liste blanche stricte écarte tout champ inconnu : jamais de secret, donnée bancaire, contenu de facture ni obligation.
+
+**Vérification officielle d'un CheckLink** (mitigation de la menace « CheckLink imité ») : `POST /api/v1/requirements/verify` reçoit le profil décodé du fragment (format inchangé) et répond sans compte :
+
+- `verified` : le profil correspond à la publication officielle de l'organisation ;
+- `mismatch` : l'organisation est publiée mais le profil diverge (les noms des champs divergents sont listés) ;
+- `not_published` : l'organisation a des exigences mais ne les a pas publiées ;
+- `unknown` : aucune exigence connue pour cette organisation.
+
+Toujours `stored: false`. Une réponse `verified` atteste la correspondance avec la publication au moment de la requête ; ce n'est ni une certification d'entreprise ni une garantie de livraison.
+
 ## Administration des clés (0.16.0)
 
 `/api/v1/admin/*` exige l'authentification Bearer et un registre persistant. La matrice de rôles est appliquée serveur :

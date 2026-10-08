@@ -131,6 +131,122 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /requirements:
+    get:
+      operationId: searchRequirements
+      summary: Rechercher publiquement les exigences de réception publiées (sans compte)
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 80 }
+          description: Raison sociale (partielle), numéro de TVA ou identifiant Peppol.
+      responses:
+        '200':
+          description: Résultats minimisés, uniquement publiés
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementsSearchResponse'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '503':
+          $ref: '#/components/responses/ApiError'
+    post:
+      operationId: publishRequirements
+      summary: Publier ou mettre à jour les exigences de l'organisation authentifiée (admin/owner, opt-in explicite)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementsPublishRequest'
+      responses:
+        '200':
+          description: Brouillon enregistré (published false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementsMutationResponse'
+        '201':
+          description: Exigences publiées
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementsMutationResponse'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '403':
+          $ref: '#/components/responses/ApiError'
+        '429':
+          $ref: '#/components/responses/ApiError'
+        '503':
+          $ref: '#/components/responses/ApiError'
+    patch:
+      operationId: patchRequirements
+      summary: Mettre à jour les exigences ou le drapeau published de l'organisation authentifiée
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementsPublishRequest'
+      responses:
+        '200':
+          description: Exigences à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementsMutationResponse'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '403':
+          $ref: '#/components/responses/ApiError'
+    delete:
+      operationId: deleteRequirements
+      summary: Dépublier et supprimer les exigences de l'organisation authentifiée
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Exigences supprimées
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementsMutationResponse'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '403':
+          $ref: '#/components/responses/ApiError'
+  /requirements/verify:
+    post:
+      operationId: verifyCheckLinkRequirements
+      summary: Vérifier publiquement un profil CheckLink décodé contre la publication officielle (sans compte)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementsVerifyRequest'
+      responses:
+        '200':
+          description: verified | mismatch | not_published | unknown (stored false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementsVerifyResponse'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '503':
+          $ref: '#/components/responses/ApiError'
   /admin/keys:
     get:
       operationId: listAdminKeys
@@ -515,6 +631,68 @@ components:
             role: { enum: [owner, admin, viewer] }
         expiresAt: { type: string, format: date-time }
         terminated: { type: boolean }
+    RequirementsSearchResponse:
+      type: object
+      required: [schema, apiVersion, requestId, query, count, results, stored]
+      properties:
+        schema: { const: settlemesh-requirements }
+        apiVersion: { const: v1 }
+        requestId: { type: string, format: uuid }
+        query: { type: string }
+        count: { type: integer, minimum: 0 }
+        stored: { const: false }
+        results:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [organizationId, profile, published]
+            properties:
+              organizationId: { type: string }
+              profile:
+                type: object
+                description: Minimisé — sans e-mail de soumission ni instructions.
+              published: { const: true }
+    RequirementsMutationResponse:
+      type: object
+      required: [schema, apiVersion, requestId, organizationId, published, stored]
+      properties:
+        schema: { const: settlemesh-requirements }
+        apiVersion: { const: v1 }
+        requestId: { type: string, format: uuid }
+        organizationId: { type: string }
+        published: { type: boolean }
+        version: { type: [integer, 'null'] }
+        notice: { type: string }
+        deleted: { type: boolean }
+        stored: { const: false }
+    RequirementsPublishRequest:
+      type: object
+      required: [profile]
+      properties:
+        published: { type: boolean, default: false, description: Opt-in explicite ; false = brouillon non cherchable. }
+        profile:
+          $ref: '#/components/schemas/Profile'
+    RequirementsVerifyRequest:
+      type: object
+      required: [profile]
+      properties:
+        profile:
+          $ref: '#/components/schemas/Profile'
+    RequirementsVerifyResponse:
+      type: object
+      required: [schema, apiVersion, requestId, verdict, reason, stored]
+      properties:
+        schema: { const: settlemesh-requirements-verify }
+        apiVersion: { const: v1 }
+        requestId: { type: string, format: uuid }
+        verdict: { enum: [verified, mismatch, not_published, unknown] }
+        reason: { type: string }
+        mismatches:
+          type: array
+          items: { type: string }
+          description: Noms des champs divergents (verdict mismatch uniquement).
+        stored: { const: false }
     AdminKeysResponse:
       type: object
       required: [schema, apiVersion, requestId, organizationId, keys]
@@ -580,6 +758,8 @@ components:
                 dans le registre), FORBIDDEN_ROLE (403), ADMIN_REQUIRES_REGISTRY
                 (409), KEY_NOT_FOUND (404), KEY_ID_UNAVAILABLE (409),
                 INVALID_ADMIN_PAYLOAD (400), UNKNOWN_ADMIN_ROUTE (404),
+                INVALID_REQUIREMENTS_PAYLOAD (400), INVALID_REQUIREMENTS_QUERY
+                (400), REQUIREMENTS_UNAVAILABLE (503),
                 RATE_LIMITED et UPSTREAM_RATE_LIMITED (429), INVALID_JSON,
                 INVALID_VAT_COUNTRY, INVALID_VAT_NUMBER, INVALID_PEPPOL_ID,
                 IDENTITY_CHECK_FAILED, METHOD_NOT_ALLOWED, NOT_FOUND,

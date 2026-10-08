@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.18.0` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h et cookies durcis, MFA propriétaire TOTP RFC 6238 sans dépendance, métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production (interface navigateur de gestion en étape suivante) |
+| Version du code | `0.19.0` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h et cookies durcis, MFA propriétaire TOTP RFC 6238 sans dépendance, registre public d'exigences de réception (recherche et vérification de CheckLink sans compte), métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production (interface navigateur de gestion en étape suivante) |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 124 tests au 8 octobre 2026 |
+| Tests automatisés | 130 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -156,7 +156,7 @@ Légende :
 | Identité | Registre d'organisations persistant (hashes, rôles, révocation, quotas) | Partiel | Fichier local ou stockage managé Supabase (`SETTLEMESH_SUPABASE_*`), relus sans redémarrage, clés uniquement hashées ; rôles résolus et renvoyés, API d'administration de clés appliquant la matrice owner/admin/viewer (0.16.0) ; revue RGPD externe requise pour des données réelles |
 | Identité | Membres humains, login/logout, sessions et cookies durcis | Partiel | Stockage managé uniquement (e-mail + mot de passe scrypt, sessions 24 h en table, cookie `HttpOnly`/`SameSite=Lax`, badge `members`) ; **MFA propriétaire TOTP actif depuis 0.18.0** (`/auth/mfa/setup` → `/auth/mfa/enable`, code exigé au login, rattrapage affiché pour un owner sans MFA) ; pas d'interface navigateur de gestion ni de réinitialisation de mot de passe, revue RGPD externe requise pour des données personnelles réelles (e-mail salarié) |
 | Identité | Comptes, organisations multi-utilisateurs, rôles | Partiel | Comptes humains par e-mail et rôle disponibles en 0.17.0 ; multi-organisation, invitations, changement/oubli de mot de passe et interface de gestion restent à construire |
-| Réseau | Invitations et contreparties vérifiées | Prévu | Condition du vrai effet réseau |
+| Réseau | Registre public d'exigences de réception (recherche et vérification sans compte) | Partiel | API et stockage actifs (0.19.0), publication opt-in testée, réponses minimisées ; interface de recherche navigateur absente, signature du profil pas encore implémentée |
 | Connecteurs | VIES | Opérationnel | Requête explicite sans stockage ; réponse ponctuelle, disponibilité amont et portée juridique limitées |
 | Connecteurs | Peppol Directory | Opérationnel | Recherche exacte limitée à 2/s ; présence d’annuaire distincte de la joignabilité SMP |
 | Connecteurs | PDP/PA et ERP | Prévu | APIs, authentification, quotas et gouvernance à cadrer |
@@ -490,6 +490,7 @@ SettleMesh/
 │   ├── members.mjs              membres humains (scrypt) et sessions de 24 h
 │   ├── totp.mjs                 TOTP RFC 6238 et Base32 RFC 4648 (sans dépendance)
 │   ├── admin.mjs                administration des clés (matrice de rôles)
+│   ├── requirements.mjs         registre public d'exigences (liste blanche, vérification CheckLink)
 │   ├── server.mjs               HTTP, routage, limites et fichiers statiques
 │   └── validation.mjs           validation serveur EN 16931 / Peppol
 ├── docs/
@@ -699,7 +700,16 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 124 tests
+### 12.2 Couverture actuelle des 130 tests
+
+`test/requirements.test.js` — 6 tests :
+
+- liste blanche stricte : contenu de facture, d'obligation, secret ou champ inconnu écarté, normalisation vérifiée ;
+- adaptateur : upsert atomique par organisation et recherche filtrée sur `published=eq.true`, minimisation (pas d'e-mail de soumission ni instructions) ;
+- HTTP : publication opt-in explicite, viewer refusé (403), brouillon non cherchable puis cherchable après publication, le tout sans compte pour la recherche ;
+- vérification officielle : `verified`/`mismatch` (noms de champs divergents)/`not_published`/`unknown` distingués, `stored: false` ;
+- l'organisation B écrit toujours dans son propre espace, jamais dans celui de l'organisation A ;
+- sans stockage configuré : `503 REQUIREMENTS_UNAVAILABLE` côté public et authentifié.
 
 `test/auth-mfa.test.js` — 8 tests :
 
@@ -892,6 +902,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - basculer le scénario Net entre « toutes les échéances », « cut-off aujourd'hui » et une date personnalisée, et vérifier que les obligations différées restent visibles et que la somme des positions nettes reste nulle ;
 - importer un CSV multidevise ;
 - vérifier qu'une facture litigieuse et une créance cédée sont exclues ;
+- vérification officielle publique d'un CheckLink : publier les exigences d'une organisation puis vérifier `verified`, `mismatch`, `not_published` et `unknown` via `/api/v1/requirements/verify`, sans compte ;
 - tester la navigation clavier et la largeur mobile.
 
 ## 13. Feuille de route ordonnée
@@ -963,7 +974,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Métriques pilote interprétées comme audience globale | Moyen | Libellés « local », export volontaire et distinction explicite entre CheckLink copié et ouverture externe non mesurée |
 | Réapparition de l'ancienne marque Eurule | Faible | SettleMesh est la marque mère depuis v0.4 ; les anciens profils et données locales restent importables uniquement pour compatibilité |
 | Compromission ou mauvaise isolation d'une clé API pilote | Critique | Clés fortes, hashes uniquement (jamais en clair), comparaison constante, organisation déterminée côté serveur, rotation, révocation et quotas persistés via le registre fichier 0.14.0 ; ne pas déployer avant gestionnaire de secrets, TLS, chiffrement au repos et pentest externe |
-| CheckLink imité par un tiers malveillant (hameçonnage fournisseur) | Critique | Identité de l'acheteur lisible dans le lien et la page, parcours fournisseur sans compte ni donnée bancaire ; signature du profil et page officielle de vérification à l'étude ; menace consignée dans `docs/SECURITY.md` |
+| CheckLink imité par un tiers malveillant (hameçonnage fournisseur) | Critique | Identité de l'acheteur lisible dans le lien et la page, parcours fournisseur sans compte ni donnée bancaire ; **vérification officielle publique d'un CheckLink contre les exigences publiées depuis 0.19.0** (verified/mismatch/not_published/unknown) ; menace consignée dans `docs/SECURITY.md` | signature du profil dans le lien et interface de vérification navigateur restent à construire ; sensibiliser à l'origine du lien |
 
 ## 15. Journal des décisions
 
@@ -992,6 +1003,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-08 | Ajouter l'API d'administration des clés avec application de la matrice de rôles (étape 2a) | Donner un usage réel aux rôles owner/admin/viewer (ils n'étaient qu'informables) tout en gardant les sessions humaines et le MFA pour une étape ultérieure | `GET/POST/PATCH/DELETE /api/v1/admin/*` avec isolation par organisation testée, écriture du document complet revalidée par le registre, révocation immédiatement effective sur la source active, `409 ADMIN_REQUIRES_REGISTRY` sans registre persistant ; un admin ne peut jamais créer ni promouvoir vers owner ; l'UI navigateur de gestion n'existe pas encore |
 | 2026-10-08 | Ajouter membres humains et sessions durcies (étape 2b-1) sans MFA | Ouvrir la voie à l'interface de gestion tout en bornant l'exposition : e-mail + mot de passe haché scrypt, sessions 24 h côté serveur, cookie `HttpOnly`/`SameSite=Lax` ; toute indisponibilité du stockage reste `503` et jamais maquillée en mauvais identifiants | `POST /api/v1/auth/login`, `/logout`, `GET /me` ; tables `public.settlemesh_members` et `public.settlemesh_sessions` (RLS sans policy), MFA propriétaire en 2b-2 et interface navigateur de gestion en 2b-3 ; aucun mot de passe enterré, aucun secret du stockage dans le dépôt ; revue RGPD externe requise avant données personnelles réelles |
 | 2026-10-08 | Activer le MFA propriétaire TOTP RFC 6238 (étape 2b-2) | Renforcer les comptes sensibles avec un second facteur sans dépendance nouvelle ; enrôlement en deux temps (setup inactif, puis validation par code) pour éviter l'auto-verrouillage | `/auth/mfa/setup` + `/auth/mfa/enable` (fenêtre ±1 pas, comparaison temps constant) + `/auth/mfa/disable` (mot de passe requis) + `/auth/password` (changement authentifié) ; au login un code valide est exigé (`401 MFA_REQUIRED`), le rattrapage d'un owner sans MFA est affiché (`mfaEnrollmentRequired`) ; le compteur HOTP est codé sur 8 octets, validé par les vecteurs RFC 6238 ; QR code restant à rendre en 2b-3, revue RGPD externe requise avant données personnelles réelles |
+| 2026-10-08 | Créer le registre public d'exigences de réception (étape 4 du pack) | Permettre à un fournisseur de trouver et vérifier les exigences d'un client sans compte, et réduire la menace « CheckLink imité » par une vérification officielle publique | Table `public.settlemesh_requirements` (RLS sans policy), publication opt-in explicite jamais silencieuse, matrice admin/owner et organisation résolue côté serveur, recherche minimisée sans compte, vérification `verified/mismatch/not_published/unknown` avec format CheckLink inchangé ; interface navigateur de recherche et signature du profil restent à construire |
 
 ## 16. Questions ouvertes à trancher
 
