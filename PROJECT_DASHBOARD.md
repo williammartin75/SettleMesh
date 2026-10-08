@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.17.0` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h et cookies durcis, métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production (MFA et interface navigateur de gestion en étape suivante) |
+| Version du code | `0.18.0` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h et cookies durcis, MFA propriétaire TOTP RFC 6238 sans dépendance, métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production (interface navigateur de gestion en étape suivante) |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 116 tests au 8 octobre 2026 |
+| Tests automatisés | 124 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -154,7 +154,7 @@ Légende :
 | Netting | Positions nettes et paiements résiduels | Opérationnel | Aucun ordre de paiement n'est émis |
 | Netting | Export des propositions et allocations | Opérationnel | Document de travail, pas un accord signé |
 | Identité | Registre d'organisations persistant (hashes, rôles, révocation, quotas) | Partiel | Fichier local ou stockage managé Supabase (`SETTLEMESH_SUPABASE_*`), relus sans redémarrage, clés uniquement hashées ; rôles résolus et renvoyés, API d'administration de clés appliquant la matrice owner/admin/viewer (0.16.0) ; revue RGPD externe requise pour des données réelles |
-| Identité | Membres humains, login/logout, sessions et cookies durcis | Partiel | Stockage managé uniquement (e-mail + mot de passe scrypt, sessions 24 h en table, cookie `HttpOnly`/`SameSite=Lax`, badge `members`) ; pas de MFA propriétaire, pas d'interface navigateur de gestion, pas de mot de passe de réinitialisation, revue RGPD externe requise pour des données personnelles réelles (e-mail salarié) |
+| Identité | Membres humains, login/logout, sessions et cookies durcis | Partiel | Stockage managé uniquement (e-mail + mot de passe scrypt, sessions 24 h en table, cookie `HttpOnly`/`SameSite=Lax`, badge `members`) ; **MFA propriétaire TOTP actif depuis 0.18.0** (`/auth/mfa/setup` → `/auth/mfa/enable`, code exigé au login, rattrapage affiché pour un owner sans MFA) ; pas d'interface navigateur de gestion ni de réinitialisation de mot de passe, revue RGPD externe requise pour des données personnelles réelles (e-mail salarié) |
 | Identité | Comptes, organisations multi-utilisateurs, rôles | Partiel | Comptes humains par e-mail et rôle disponibles en 0.17.0 ; multi-organisation, invitations, changement/oubli de mot de passe et interface de gestion restent à construire |
 | Réseau | Invitations et contreparties vérifiées | Prévu | Condition du vrai effet réseau |
 | Connecteurs | VIES | Opérationnel | Requête explicite sans stockage ; réponse ponctuelle, disponibilité amont et portée juridique limitées |
@@ -487,6 +487,9 @@ SettleMesh/
 │   ├── auth.mjs                 génération, configuration et authentification des clés API
 │   ├── registry.mjs             registre d'organisations (fichier local : hashes, rôles, révocation)
 │   ├── registry-supabase.mjs    adaptateur du registre vers PostgREST/Supabase (fetch natif)
+│   ├── members.mjs              membres humains (scrypt) et sessions de 24 h
+│   ├── totp.mjs                 TOTP RFC 6238 et Base32 RFC 4648 (sans dépendance)
+│   ├── admin.mjs                administration des clés (matrice de rôles)
 │   ├── server.mjs               HTTP, routage, limites et fichiers statiques
 │   └── validation.mjs           validation serveur EN 16931 / Peppol
 ├── docs/
@@ -538,6 +541,8 @@ Limites : corps HTTP de validation de 2 Mo, XML de 1 Mo, protection générale d
 Depuis la version 0.15.0, le stockage managé est actif : en présence de `SETTLEMESH_SUPABASE_PROJECT_REF` et `SETTLEMESH_SUPABASE_SERVICE_KEY` (variables d'environnement utilisateur, jamais dans le dépôt), le registre est chargé depuis la table `public.settlemesh_registry` du projet (RLS activée, aucune policy : seul le service_role lit et écrit) via PostgREST en `fetch` natif, sans dépendance nouvelle. Priorité de chargement : fichier local > Supabase > variable d'environnement. La lecture est mise en cache 5 s et les écritures passent par `npm run registry:push -- <registre.json>` (upsert atomique d'une ligne `id=1`, document complet) ; le badge `supabase` est exposé dans `/health` sous `authentication`. Cycle vérifié le 8 octobre 2026 sur le projet réel : pousser → valider (200, rôle renvoyé) → révoquer dans le fichier → re-pousser → revalider (401 `API_KEY_REVOKED`) **sans redémarrage du serveur**.
 
 Depuis la version 0.16.0, les clés s'administrent par API sous `/api/v1/admin/*` (authentification Bearer, matrice de rôles appliquée serveur) : `GET /admin/keys` liste les clés de sa propre organisation, `POST /admin/keys` crée une clé (rôle au plus élevé du demandeur ; un `admin` ne peut jamais créer de `owner`), `PATCH /admin/keys/{keyId}` change le rôle (owner uniquement) ou `revokedAt` (admin ou owner), `DELETE /admin/keys/{keyId}` révoque immédiatement et `PATCH /admin/organization` ajuste le quota (owner uniquement). Toutes les mutations réécrivent le document complet du registre (fichier, puis validation par règles) et respectent l'isolation stricte entre organisations (`KEY_NOT_FOUND` pour une clé d'une autre organisation). L'administration exige un registre persistant : avec `SETTLEMESH_API_KEYS` seul, la réponse est `409 ADMIN_REQUIRES_REGISTRY`.
+
+Depuis la version 0.17.0, des comptes humains existent : `POST /api/v1/auth/login`, `/logout` et `GET /me`, cookie `settlemesh_session` `HttpOnly`/`SameSite=Lax` de 24 h, mot de passe haché scrypt. Depuis la version 0.18.0, le MFA propriétaire (TOTP RFC 6238 en `server/totp.mjs`, sans dépendance) s'enrôle via `POST /auth/mfa/setup` (secret Base32 + URI otpauth, stocké inactif) puis `/auth/mfa/enable` (code vérifié avec fenêtre ±1 pas) ; au login, un compte MFA actif exige un code valide (`401 MFA_REQUIRED`) et un owner sans MFA se connecte avec `mfaEnrollmentRequired: true` ; `/auth/mfa/disable` exige le mot de passe ; `POST /auth/password` permet le changement de mot de passe authentifié par session. Le QR code reste à rendre côté interface. Toute indisponibilité du stockage reste `503 MEMBERS_UNAVAILABLE`, jamais maquillée en mauvais identifiants (invariant testé).
 
 ## 8. Invariants à ne jamais casser
 
@@ -694,7 +699,18 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 116 tests
+### 12.2 Couverture actuelle des 124 tests
+
+`test/auth-mfa.test.js` — 8 tests :
+
+- base32 conforme aux vecteurs RFC 4648 ;
+- TOTP conforme aux vecteurs RFC 6238 (T=59 → 287082, etc.) ;
+- vérification avec fenêtre ±1 pas, refus hors fenêtre et hors format ;
+- URI `otpauth` bien formée, secret canonique de 20 octets ;
+- login owner avec MFA : sans code → `401 MFA_REQUIRED`, avec le bon code → 200 ;
+- viewer sans MFA : login direct sans drapeau d'enrôlement ;
+- owner sans MFA actif : login toléré avec `mfaEnrollmentRequired: true` ;
+- setup → enable (mauvais code refusé) → disable (mot de passe requis) → changement de mot de passe qui invalide l'ancien.
 
 `test/members-sessions.test.js` — 5 tests :
 
@@ -860,6 +876,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - tester les deux factures de démonstration ;
 - contrôler le PDF Factur-X de fixture et vérifier la règle nationale de profil : `pass` sur un profil EN 16931, `warning` sur un profil MINIMUM, notice sur EXTENDED-CTC-FR ;
 - avec une clé admin, lister `/api/v1/admin/keys`, créer une clé viewer, la valider, la révoquer par DELETE puis vérifier le `401 API_KEY_REVOKED` à chaud ;
+- créer un membre owner, activer son MFA (setup puis enable avec le code de l'application), vérifier que le login sans code répond `401 MFA_REQUIRED` et que le changement de mot de passe invalide l'ancien ;
 - contrôler un CII EXTENDED avec sous-lignes (chemin de fer) et vérifier le rapprochement BT-106 ainsi que le signalement d'un ParentLineID orphelin ;
 - vérifier que les diagnostics français affichent les contrôles nationaux : format TVA FR, clé SIREN/SIRET du routage et notice de réforme ;
 - importer un UBL, un CII et le PDF Factur-X de fixture ;
@@ -974,6 +991,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-08 | Brancher le registre sur la plateforme managée Supabase via PostgREST en fetch natif | Fermer la porte « adaptateur plateforme managée » sans dépendance nouvelle ni changement de contrat ; clé service_role limitée à un projet plutôt qu'un token compte-entier | Table `public.settlemesh_registry` durcie par RLS (aucune policy : seul le service_role lit/écrit), lecture en cache 5 s, `npm run registry:push` à upsert atomique, priorité fichier local > Supabase > mémoire, `.balise supabase` dans /health ; cycle réel pousser→valider→révoquer→401 vérifié sans redémarrage ; vérification RGPD externe et pentest toujours requis, RLS peut gagner par la suite des policies par organisation |
 | 2026-10-08 | Ajouter l'API d'administration des clés avec application de la matrice de rôles (étape 2a) | Donner un usage réel aux rôles owner/admin/viewer (ils n'étaient qu'informables) tout en gardant les sessions humaines et le MFA pour une étape ultérieure | `GET/POST/PATCH/DELETE /api/v1/admin/*` avec isolation par organisation testée, écriture du document complet revalidée par le registre, révocation immédiatement effective sur la source active, `409 ADMIN_REQUIRES_REGISTRY` sans registre persistant ; un admin ne peut jamais créer ni promouvoir vers owner ; l'UI navigateur de gestion n'existe pas encore |
 | 2026-10-08 | Ajouter membres humains et sessions durcies (étape 2b-1) sans MFA | Ouvrir la voie à l'interface de gestion tout en bornant l'exposition : e-mail + mot de passe haché scrypt, sessions 24 h côté serveur, cookie `HttpOnly`/`SameSite=Lax` ; toute indisponibilité du stockage reste `503` et jamais maquillée en mauvais identifiants | `POST /api/v1/auth/login`, `/logout`, `GET /me` ; tables `public.settlemesh_members` et `public.settlemesh_sessions` (RLS sans policy), MFA propriétaire en 2b-2 et interface navigateur de gestion en 2b-3 ; aucun mot de passe enterré, aucun secret du stockage dans le dépôt ; revue RGPD externe requise avant données personnelles réelles |
+| 2026-10-08 | Activer le MFA propriétaire TOTP RFC 6238 (étape 2b-2) | Renforcer les comptes sensibles avec un second facteur sans dépendance nouvelle ; enrôlement en deux temps (setup inactif, puis validation par code) pour éviter l'auto-verrouillage | `/auth/mfa/setup` + `/auth/mfa/enable` (fenêtre ±1 pas, comparaison temps constant) + `/auth/mfa/disable` (mot de passe requis) + `/auth/password` (changement authentifié) ; au login un code valide est exigé (`401 MFA_REQUIRED`), le rattrapage d'un owner sans MFA est affiché (`mfaEnrollmentRequired`) ; le compteur HOTP est codé sur 8 octets, validé par les vecteurs RFC 6238 ; QR code restant à rendre en 2b-3, revue RGPD externe requise avant données personnelles réelles |
 
 ## 16. Questions ouvertes à trancher
 

@@ -32,6 +32,8 @@ export function createSupabaseMembers({ projectRef, serviceKey, fetchImpl = glob
   }
   const base = `https://${projectRef}.supabase.co/rest/v1`;
   const headers = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json", Accept: "application/json" };
+  let mfaColumnsSupported = true; // détecté à la première lecture ; ALTER SQL absent → MFA indisponible explicitement
+  let probed = false;
   const request = async (url, init = {}) => {
     let response;
     try {
@@ -46,10 +48,46 @@ export function createSupabaseMembers({ projectRef, serviceKey, fetchImpl = glob
     }
     return response;
   };
+  const memberSelect = () => (mfaColumnsSupported
+    ? "id,organization_id,email,password_hash,role,mfa_secret,mfa_enabled"
+    : "id,organization_id,email,password_hash,role");
+
+  // Détection de capacité à la première requête : colonnes MFA absentes
+  // (ALTER SQL non exécuté) → le store continue de servir le login mais le
+  // MFA reste explicitement indisponible ; jamais maquillé en succès.
+  const probeMfaColumns = async () => {
+    probed = true;
+    const probeUrl = `${base}/settlemesh_members?select=${encodeURIComponent("id,organization_id,email,password_hash,role,mfa_secret,mfa_enabled")}&limit=1`;
+    let response;
+    try {
+      response = await fetchImpl(probeUrl, { headers });
+    } catch (error) {
+      throw memberUnavailable(error?.message || "requête impossible");
+    }
+    if (response.ok) {
+      mfaColumnsSupported = true;
+      return;
+    }
+    if (response.status === 404) throw memberUnavailable("table settlemesh_members introuvable");
+    mfaColumnsSupported = false; // colonnes MFA absentes : exécuter l'ALTER SQL documenté
+  };
 
   return {
+    async mfaCapability() {
+      if (!probed) await probeMfaColumns();
+      return mfaColumnsSupported;
+    },
     async findMemberByEmail(email) {
-      const response = await request(`/settlemesh_members?email=eq.${encodeURIComponent(String(email).toLowerCase())}&select=id,organization_id,email,password_hash,role`);
+      if (!probed) await probeMfaColumns();
+      const response = await request(`/settlemesh_members?email=eq.${encodeURIComponent(String(email).toLowerCase())}&select=${memberSelect()}`);
+      const rows = await response.json();
+      if (!rows.length) return null;
+      return rows[0];
+    },
+    async findMemberById(memberId) {
+      if (!/^[0-9a-f-]{36}$/i.test(String(memberId || ""))) return null;
+      if (!probed) await probeMfaColumns();
+      const response = await request(`/settlemesh_members?id=eq.${memberId}&select=${memberSelect()}`);
       const rows = await response.json();
       return rows.length ? rows[0] : null;
     },
@@ -58,6 +96,24 @@ export function createSupabaseMembers({ projectRef, serviceKey, fetchImpl = glob
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=representation" },
         body: JSON.stringify({ organization_id: organizationId, email: String(email).toLowerCase(), password_hash: passwordHash, role })
+      });
+      const rows = await response.json();
+      return Array.isArray(rows) && rows.length ? rows[0] : null;
+    },
+    async updatePassword(memberId, passwordHash) {
+      const response = await request(`/settlemesh_members?id=eq.${memberId}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ password_hash: passwordHash })
+      });
+      if (!response.ok) throw memberUnavailable(`réponse ${response.status} lors du changement de mot de passe`);
+      return true;
+    },
+    async updateMfa(memberId, { mfaSecret, mfaEnabled }) {
+      const response = await request(`/settlemesh_members?id=eq.${memberId}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ mfa_secret: mfaSecret, mfa_enabled: mfaEnabled })
       });
       const rows = await response.json();
       return Array.isArray(rows) && rows.length ? rows[0] : null;

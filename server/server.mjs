@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { authenticateApiKey, parseApiKeyConfiguration } from "./auth.mjs";
 import { createFileRegistry, writeRegistryFile } from "./registry.mjs";
 import { createSupabaseRegistry } from "./registry-supabase.mjs";
-import { createSupabaseMembers, verifyPassword } from "./members.mjs";
+import { createSupabaseMembers, verifyPassword, hashPassword } from "./members.mjs";
+import { verifyTotp, generateTotpSecret } from "./totp.mjs";
 import { handleAdminRequest } from "./admin.mjs";
 import { validateApiInvoice } from "./validation.mjs";
 import { IdentityInputError, verifyPeppol, verifyVies } from "../worker/identity.mjs";
@@ -82,6 +83,23 @@ const rateHeaders = (rate, limit, scope) => ({
   "X-RateLimit-Reset": String(Math.ceil(rate.resetAt / 1000)),
   "X-RateLimit-Scope": scope
 });
+
+const requireValidSession = async (store, cookie) => {
+  if (!cookie) throw Object.assign(new Error("Aucune session SettleMesh (cookie) pour cette requête."), { code: "AUTH_REQUIRED", status: 401 });
+  const session = await store.findSession(cookie);
+  if (!session) throw Object.assign(new Error("Session inconnue ou expirée."), { code: "SESSION_EXPIRED", status: 401 });
+  return session;
+};
+
+const membersErrorResponse = (response, requestId, headers, error) => {
+  if (error?.code === "MEMBERS_UNAVAILABLE") {
+    const failure = apiError(requestId, error.code, error.message, 503);
+    return jsonResponse(response, 503, failure.body, headers);
+  }
+  const status = error?.status || 401;
+  const failure = apiError(requestId, error?.code || "INVALID_CREDENTIALS", error?.message || "Erreur de session.", status);
+  return jsonResponse(response, status, failure.body, headers);
+};
 
 export function createSettleMeshServer({
   root = defaultRoot,
@@ -201,11 +219,16 @@ export function createSettleMeshServer({
               const failure = apiError(requestId, "INVALID_CREDENTIALS", "Identifiants invalides.", 401);
               return jsonResponse(response, 401, failure.body, ipRateHeaders);
             }
+            if (member.mfa_enabled && !verifyTotp(member.mfa_secret || "", payload?.code)) {
+              const failure = apiError(requestId, "MFA_REQUIRED", "Un code d'authentification valide est requis pour ce compte.", 401);
+              return jsonResponse(response, 401, failure.body, ipRateHeaders);
+            }
             const session = await membersStore.createSession({ memberId: member.id, organizationId: member.organization_id, role: member.role });
             return jsonResponse(response, 200, {
               schema: "settlemesh-session", apiVersion: API_VERSION, requestId,
               organizationId: session.organizationId,
               member: { email: member.email, role: member.role },
+              mfaEnrollmentRequired: member.role === "owner" && !member.mfa_enabled,
               expiresAt: session.expiresAt
             }, { ...ipRateHeaders, "Set-Cookie": `settlemesh_session=${session.sessionId}; ${cookieOptions}` });
           } catch (error) {
@@ -215,6 +238,89 @@ export function createSettleMeshServer({
             }
             const failure = apiError(requestId, error.code || "INVALID_CREDENTIALS", error.statusCode && error.statusCode < 500 ? error.message : "Identifiants non analysables.", 400);
             return jsonResponse(response, 400, failure.body, ipRateHeaders);
+          }
+        }
+
+        if (url.pathname === "/api/v1/auth/mfa/setup" && request.method === "POST") {
+          try {
+            const session = await requireValidSession(membersStore, sessionCookie);
+            const member = await membersStore.findMemberById(session.member_id);
+            if (!member) throw Object.assign(new Error("Session inconnue ou expirée."), { code: "SESSION_EXPIRED", status: 401 });
+            const { secret, otpauthUri } = generateTotpSecret(member.email);
+            await membersStore.updateMfa(member.id, { mfaSecret: secret, mfaEnabled: false });
+            return jsonResponse(response, 200, {
+              schema: "settlemesh-session", apiVersion: API_VERSION, requestId,
+              mfaEnabled: false, secret, otpauthUri,
+              notice: "Saisissez le secret dans votre application d'authentification (ou ouvrez l'URI otpauth), puis validez via /auth/mfa/enable."
+            }, ipRateHeaders);
+          } catch (error) {
+            return membersErrorResponse(response, requestId, ipRateHeaders, error);
+          }
+        }
+
+        if (url.pathname === "/api/v1/auth/mfa/enable" && request.method === "POST") {
+          try {
+            const session = await requireValidSession(membersStore, sessionCookie);
+            const payload = await readOptionalJson(request);
+            const member = await membersStore.findMemberById(session.member_id);
+            if (!member) throw Object.assign(new Error("Session inconnue ou expirée."), { code: "SESSION_EXPIRED", status: 401 });
+            if (!member.mfa_secret) {
+              const failure = apiError(requestId, "INVALID_ADMIN_PAYLOAD", "Lancez d'abord /api/v1/auth/mfa/setup.", 400);
+              return jsonResponse(response, 400, failure.body, ipRateHeaders);
+            }
+            if (!verifyTotp(member.mfa_secret, payload?.code)) {
+              const failure = apiError(requestId, "INVALID_CREDENTIALS", "Code d'authentification invalide.", 401);
+              return jsonResponse(response, 401, failure.body, ipRateHeaders);
+            }
+            const updated = await membersStore.updateMfa(member.id, { mfaSecret: member.mfa_secret, mfaEnabled: true });
+            return jsonResponse(response, 200, {
+              schema: "settlemesh-session", apiVersion: API_VERSION, requestId,
+              mfaEnabled: Boolean(updated?.mfa_enabled ?? true), member: { role: member.role }, organizationId: member.organization_id
+            }, ipRateHeaders);
+          } catch (error) {
+            return membersErrorResponse(response, requestId, ipRateHeaders, error);
+          }
+        }
+
+        if (url.pathname === "/api/v1/auth/mfa/disable" && request.method === "POST") {
+          try {
+            const session = await requireValidSession(membersStore, sessionCookie);
+            const member = await membersStore.findMemberById(session.member_id);
+            if (!member) throw Object.assign(new Error("Session inconnue ou expirée."), { code: "SESSION_EXPIRED", status: 401 });
+            const payload = await readOptionalJson(request);
+            if (!verifyPassword(payload?.password || "", member.password_hash)) {
+              const failure = apiError(requestId, "INVALID_CREDENTIALS", "Identifiants invalides.", 401);
+              return jsonResponse(response, 401, failure.body, ipRateHeaders);
+            }
+            await membersStore.updateMfa(member.id, { mfaSecret: null, mfaEnabled: false });
+            return jsonResponse(response, 200, {
+              schema: "settlemesh-session", apiVersion: API_VERSION, requestId,
+              mfaEnabled: false, member: { role: member.role }, organizationId: member.organization_id
+            }, ipRateHeaders);
+          } catch (error) {
+            return membersErrorResponse(response, requestId, ipRateHeaders, error);
+          }
+        }
+
+        if (url.pathname === "/api/v1/auth/password" && request.method === "POST") {
+          try {
+            const session = await requireValidSession(membersStore, sessionCookie);
+            const payload = await readOptionalJson(request);
+            const member = await membersStore.findMemberById(session.member_id);
+            if (!member) throw Object.assign(new Error("Session inconnue ou expirée."), { code: "SESSION_EXPIRED", status: 401 });
+            if (!verifyPassword(payload?.currentPassword || "", member.password_hash)) {
+              const failure = apiError(requestId, "INVALID_CREDENTIALS", "Identifiants invalides.", 401);
+              return jsonResponse(response, 401, failure.body, ipRateHeaders);
+            }
+            if (typeof payload?.newPassword !== "string" || payload.newPassword.length < 8) {
+              const failure = apiError(requestId, "INVALID_ADMIN_PAYLOAD", "Le nouveau mot de passe doit contenir au moins 8 caractères.", 400);
+              return jsonResponse(response, 400, failure.body, ipRateHeaders);
+            }
+            const { stored } = hashPassword(payload.newPassword);
+            await membersStore.updatePassword(member.id, stored);
+            return jsonResponse(response, 200, { schema: "settlemesh-session", apiVersion: API_VERSION, requestId, passwordChanged: true }, ipRateHeaders);
+          } catch (error) {
+            return membersErrorResponse(response, requestId, ipRateHeaders, error);
           }
         }
 

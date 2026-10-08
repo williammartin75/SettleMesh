@@ -93,7 +93,28 @@ alter table public.settlemesh_members enable row level security;
 alter table public.settlemesh_sessions enable row level security;
 ```
 
-Créer un membre : `npm run member:add -- <organizationId> <email> [owner|admin|viewer]` (mot de passe fort généré, affiché une seule fois, jamais stocké en clair ; haché scrypt). Le serveur définit alors `POST /api/v1/auth/login`, `POST /api/v1/auth/logout` et `GET /api/v1/auth/me` avec un cookie `settlemesh_session` `HttpOnly`/`SameSite=Lax` de 24 h (ajoutez `Secure` via `SETTLEMESH_COOKIE_SECURE=1` derrière TLS). MFA propriétaire : étape suivante.
+Créer un membre : `npm run member:add -- <organizationId> <email> [owner|admin|viewer]` (mot de passe fort généré, affiché une seule fois, jamais stocké en clair ; haché scrypt). Le serveur définit alors `POST /api/v1/auth/login`, `POST /api/v1/auth/logout` et `GET /api/v1/auth/me` avec un cookie `settlemesh_session` `HttpOnly`/`SameSite=Lax` de 24 h (ajoutez `Secure` via `SETTLEMESH_COOKIE_SECURE=1` derrière TLS).
+
+### MFA propriétaire (0.18.0, étape 2b-2)
+
+TOTP RFC 6238 (SHA-1, 6 chiffres, pas 30 s) en `server/totp.mjs`, sans dépendance. Colonnes requises dans **SQL Editor** :
+
+```sql
+alter table public.settlemesh_members
+  add column if not exists mfa_secret text,
+  add column if not exists mfa_enabled boolean not null default false;
+```
+
+Endpoints (session requise) :
+
+| Opération | Effet |
+|---|---|
+| `POST /auth/mfa/setup` | génère un secret (Base32, 20 octets) + URI `otpauth://` ; stocké **inactif** jusqu'à la validation |
+| `POST /auth/mfa/enable` `{code}` | vérifie le code (fenêtre ±1 pas) puis active le MFA |
+| `POST /auth/mfa/disable` `{password}` | désactive le MFA (mot de passe du compte requis) |
+| `POST /auth/password` `{currentPassword, newPassword}` | changement de mot de passe authentifié par session |
+
+Au login : un compte avec MFA actif exige un code valide (`401 MFA_REQUIRED` sans code) ; un owner sans MFA actif se connecte avec `mfaEnrollmentRequired: true` (rattrapage affiché, sans promesse de durée). Le QR code n'est pas rendu : saisie manuelle du secret dans l'application d'authentification. Toute indisponibilité du stockage reste `503 MEMBERS_UNAVAILABLE`, jamais maquillée en mauvais code.
 
 ## Administration des clés (0.16.0)
 
