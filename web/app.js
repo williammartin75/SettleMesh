@@ -25,6 +25,7 @@ import {
   summarizeLocalMetrics
 } from "./metrics.js";
 import { createNettingDemo, exportNettingCsv, nettingCsvTemplate, parseNettingCsv, simulateNetting } from "./netting.js";
+import { activePacks } from "./rules/index.mjs";
 import { validateEuropeanStandard } from "./standards.js";
 import { compactHistory, createPersistedState, readPersistedState, writePersistedState } from "./storage.js";
 
@@ -211,6 +212,7 @@ function renderProfileSurface(profile) {
   if (profile.requireBuyerReference) requirements.push(["BR", "Référence acheteur", "Obligatoire dans BT-10"]);
   if (profile.requireAttachment) requirements.push(["＋", "Pièce justificative", "À joindre lors de la soumission"]);
   $("#requirements-list").innerHTML = requirements.map(([icon, title, detail]) => `<div class="requirement"><span>${icon}</span><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></div></div>`).join("");
+  renderNationalPacks(profile);
 }
 
 function prefillIdentityForms() {
@@ -284,6 +286,10 @@ function renderDashboard() {
   }).join("") : `<div class="empty-inline">Aucun contrôle. Lancez l’exemple pour voir le diagnostic en action.</div>`;
 }
 
+function renderNationalPacks(profile) {
+  const packs = activePacks(profile?.country);
+  $("#national-packs").innerHTML = packs.map((pack) => `<article class="source-card active-source"><div class="source-icon national">${escapeHtml(pack.country)}</div><span class="source-state">Pack v${escapeHtml(pack.version)} actif depuis le ${escapeHtml(formatDate(pack.effectiveFrom))}</span><h3>Règles nationales — ${escapeHtml(pack.country)}</h3><p>${escapeHtml(pack.ruleTitles.join(" · "))}.</p><a href="${escapeHtml(pack.sourceHref)}" target="_blank" rel="noreferrer">${escapeHtml(pack.sourceLabel)} ↗</a></article>`).join("");
+}
 function fillProfileForm() {
   const form = $("#profile-form");
   if (!form) return;

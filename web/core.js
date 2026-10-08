@@ -1,3 +1,5 @@
+import { nationalChecks } from "./rules/index.mjs";
+
 export const DEFAULT_PROFILE = Object.freeze({
   companyName: "Atelier Nova",
   legalName: "Atelier Nova SAS",
@@ -315,6 +317,8 @@ export function validateInvoice(invoice, profile = DEFAULT_PROFILE) {
   checks.push(invoice.lineCount
     ? check("lines", "pass", `${invoice.lineCount} ligne${invoice.lineCount > 1 ? "s" : ""} détectée${invoice.lineCount > 1 ? "s" : ""}`, "Structure de détail lisible.", "", "BG-25")
     : check("lines", "warning", "Aucune ligne détectée", "Le document ne contient pas de ligne de facturation reconnue.", "Ajoutez au moins une ligne de bien ou service.", "BG-25"));
+
+  checks.push(...nationalChecks(invoice, profile));
 
   return recalculateResult({
     id: `CHK-${Date.now().toString(36).toUpperCase()}-${(++resultSequence).toString(36).toUpperCase()}`, checkedAt: new Date().toISOString(), checks,

@@ -71,7 +71,7 @@ test("résume un résultat d’historique compact sans détail des contrôles", 
 test("bloque une facture visant la mauvaise entité", () => {
   const result = validateInvoice({
     syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-1", issueDate: "2026-10-07", currency: "EUR",
-    supplierName: "Studio Horizon SAS", supplierVat: "FR123", buyerName: "Autre société", buyerVat: "FR999",
+    supplierName: "Studio Horizon SAS", supplierVat: "FR96552100554", buyerName: "Autre société", buyerVat: "FR999",
     buyerEndpoint: "0009:999", purchaseOrder: "", buyerReference: "", taxExclusive: 100,
     taxAmount: 20, taxInclusive: 120, payableAmount: 120, lineCount: 1
   }, DEFAULT_PROFILE);
@@ -83,7 +83,7 @@ test("bloque une facture visant la mauvaise entité", () => {
 test("accepte une facture correspondant au profil", () => {
   const result = validateInvoice({
     syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-2", issueDate: "2026-10-07", currency: "EUR",
-    supplierName: "Studio Horizon SAS", supplierVat: "FR123", buyerName: DEFAULT_PROFILE.legalName,
+    supplierName: "Studio Horizon SAS", supplierVat: "FR96552100554", buyerName: DEFAULT_PROFILE.legalName,
     buyerVat: DEFAULT_PROFILE.vatId, buyerEndpoint: DEFAULT_PROFILE.peppolId, purchaseOrder: "PO-42",
     buyerReference: "", taxExclusive: 100, taxAmount: 20, taxInclusive: 120, payableAmount: 120, lineCount: 1
   }, DEFAULT_PROFILE);
@@ -95,7 +95,7 @@ test("accepte une facture correspondant au profil", () => {
 test("produit un rapport lisible", () => {
   const result = validateInvoice({
     syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-3", issueDate: "2026-10-07", currency: "EUR",
-    supplierName: "Studio", supplierVat: "FR123", buyerName: DEFAULT_PROFILE.legalName,
+    supplierName: "Studio", supplierVat: "FR96552100554", buyerName: DEFAULT_PROFILE.legalName,
     buyerVat: DEFAULT_PROFILE.vatId, buyerEndpoint: DEFAULT_PROFILE.peppolId, purchaseOrder: "PO-1",
     taxExclusive: 10, taxAmount: 2, taxInclusive: 12, payableAmount: 12, lineCount: 1
   }, DEFAULT_PROFILE);
@@ -128,7 +128,7 @@ test("les exemples UBL reflètent les exigences du profil", () => {
 test("rejette les placeholders comme numéro de commande", () => {
   const result = validateInvoice({
     syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-4", issueDate: "2026-10-07", currency: "EUR",
-    supplierName: "Studio", supplierVat: "FR123", buyerName: DEFAULT_PROFILE.legalName,
+    supplierName: "Studio", supplierVat: "FR96552100554", buyerName: DEFAULT_PROFILE.legalName,
     buyerVat: DEFAULT_PROFILE.vatId, buyerEndpoint: DEFAULT_PROFILE.peppolId, purchaseOrder: "n/a",
     taxExclusive: 10, taxAmount: 2, taxInclusive: 12, payableAmount: 12, lineCount: 1
   }, DEFAULT_PROFILE);
@@ -138,7 +138,7 @@ test("rejette les placeholders comme numéro de commande", () => {
 test("intègre les résultats du validateur officiel dans le score", () => {
   const base = validateInvoice({
     syntax: "UBL", documentType: "Facture", invoiceNumber: "INV-5", issueDate: "2026-10-07", currency: "EUR",
-    supplierName: "Studio", supplierVat: "FR123", buyerName: DEFAULT_PROFILE.legalName,
+    supplierName: "Studio", supplierVat: "FR96552100554", buyerName: DEFAULT_PROFILE.legalName,
     buyerVat: DEFAULT_PROFILE.vatId, buyerEndpoint: DEFAULT_PROFILE.peppolId, purchaseOrder: "PO-5",
     taxExclusive: 10, taxAmount: 2, taxInclusive: 12, payableAmount: 12, lineCount: 1
   }, DEFAULT_PROFILE);

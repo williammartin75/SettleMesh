@@ -51,7 +51,7 @@ test("minimise l’historique persistant et exclut les résultats expirés", () 
     outcome: "ready", score: 100, counts: { pass: 12 }, standards: { en16931: "1.3.16", internal: "secret" },
     invoice: {
       invoiceNumber: "INV-42", documentType: "Facture", syntax: "UBL", supplierName: "Studio Horizon",
-      supplierVat: "FR123", buyerName: "Atelier Nova SAS", buyerEndpoint: "0009:secret", currency: "EUR",
+      supplierVat: "FR96552100554", buyerName: "Atelier Nova SAS", buyerEndpoint: "0009:secret", currency: "EUR",
       payableAmount: 120, raw: "<Invoice>secret</Invoice>"
     },
     checks: [{ message: "détail confidentiel" }]
