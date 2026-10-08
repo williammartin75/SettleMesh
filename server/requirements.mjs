@@ -44,14 +44,33 @@ export function sanitizeRequirementProfile(profile) {
 
 const canonicalName = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
+// Normalisation symétrique : un champ omis est équivalent à sa valeur par
+// défaut ("" ou false ou []), des deux côtés de la comparaison — un lien
+// CheckLink porte le profil entier, mais la comparaison ne doit jamais
+// diverger sur une simple asymétrie omission/défaut.
+const PROFILE_DEFAULTS = {
+  companyName: "", legalName: "", country: "", vatId: "", peppolId: "", routingProvider: "",
+  acceptedFormats: [], acceptedCurrencies: [],
+  requirePurchaseOrder: false, requireBuyerReference: false, requireEndpoint: false, requireAttachment: false,
+  submissionEmail: "", instructions: ""
+};
+const normalizedSide = (profile) => {
+  const clean = sanitizeRequirementProfile(profile && typeof profile === "object" ? profile : {});
+  const normalized = {};
+  for (const field of PROFILE_FIELDS) {
+    normalized[field] = clean[field] ?? PROFILE_DEFAULTS[field];
+  }
+  return normalized;
+};
+
 // Comparaison entre le profil décodé d'un CheckLink et l'entrée publiée.
 // Verdicts : verified | mismatch | not_published | unknown.
 // La réponse liste seulement les noms de champs divergents (minimisée).
 export function verifyAgainstPublished(decodedProfile, publishedRow) {
   if (!publishedRow) return { verdict: "unknown", reason: "aucune exigence publiée pour cette organisation." };
   if (!publishedRow.published) return { verdict: "not_published", reason: "les exigences existent mais ne sont pas publiées." };
-  const candidate = sanitizeRequirementProfile(decodedProfile);
-  const stored = publishedRow.profile || {};
+  const candidate = normalizedSide(decodedProfile);
+  const stored = normalizedSide(publishedRow.profile || {});
   const mismatches = [];
   for (const field of PROFILE_FIELDS) {
     const left = JSON.stringify(candidate[field] ?? null);
