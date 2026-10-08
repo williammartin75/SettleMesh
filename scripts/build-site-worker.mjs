@@ -25,4 +25,4 @@ writeFileSync(resolve(output, "server/wrangler.json"), `${JSON.stringify({
 }, null, 2)}\n`);
 
 JSON.parse(readFileSync(resolve(output, ".openai/hosting.json"), "utf8"));
-console.log("Artefact Worker prêt dans dist/ (API d’identité + assets web). ");
+console.log("Artefact Worker prêt dans dist/ (identité, registre d'exigences, mesure consentie + assets web). ");

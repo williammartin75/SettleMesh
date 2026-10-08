@@ -364,6 +364,18 @@ Une réponse normalisée utilise toujours l’un des trois états suivants :
 
 Pour Peppol, la réponse peut aussi contenir le pays, la date d’inscription et le nombre de types de documents déclarés. Elle n’expose pas les contacts ni la liste brute des capacités. Une présence dans le Directory n’est ni une preuve de joignabilité SMP ni une garantie de livraison.
 
+## Routes publiques du Worker publié (0.23.0)
+
+Le Worker publié sert, même origine que le Site, trois routes publiques **sans compte**, en parité exacte avec le serveur Node — mêmes listes blanches, mêmes verdicts, mêmes formes de réponse :
+
+| Route | Méthode | Limite par IP | Détail |
+|---|---|---|---|
+| `/api/v1/requirements?q=…` | GET | 30/min | Recherche des exigences **publiées uniquement** (raison sociale, TVA intracommunautaire, identifiant Peppol) ; réponses minimisées (sans courriel de soumission ni instructions) |
+| `/api/v1/requirements/verify` | POST | 20/min | Vérification officielle d'un CheckLink contre les exigences publiées : verdicts `verified`, `mismatch`, `not_published`, `unknown` ; corps ≤ 32 Ko |
+| `/api/v1/metrics/events` | POST | 30/min | Événement de mesure **consenti** : `{ organizationId, action, day }` exactement, tout autre champ ignoré et jamais transporté ; jour futur rejeté ; réponse `202` |
+
+Configuration : secrets du Worker `SETTLEMESH_SUPABASE_PROJECT_REF` et `SETTLEMESH_SUPABASE_SERVICE_KEY` (jamais dans le dépôt). Sans secrets, les routes répondent `503 REQUIREMENTS_UNAVAILABLE` ou `METRICS_UNAVAILABLE` — jamais un succès maquillé. Le Worker reste sans stockage : les tables `settlemesh_requirements` et `settlemesh_metrics` vivent dans le projet Supabase. Les mutations authentifiées (publication, administration, validation de factures) restent sur le serveur Node : le Worker répond `405` avec la frontière explicite.
+
 ## Erreurs
 
 Toutes les erreurs suivent ce format :

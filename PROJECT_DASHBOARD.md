@@ -7,18 +7,18 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.22.0` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h, cookies durcis et MFA propriétaire TOTP sans dépendance, registre public d'exigences de réception (recherche et vérification de CheckLink sans compte) **et première interface navigateur** (recherche, publication opt-in, bouton de vérification fournisseur), métriques pilote locales **et télémétrie d'activation consentie, minimisée et anonyme** (`/api/v1/metrics`, consentement explicite porté par le profil CheckLink), connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.23.0` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h, cookies durcis et MFA propriétaire TOTP sans dépendance, registre public d'exigences de réception (recherche et vérification de CheckLink sans compte) **et première interface navigateur** (recherche, publication opt-in, bouton de vérification fournisseur), métriques pilote locales **et télémétrie d'activation consentie, minimisée et anonyme** (`/api/v1/metrics`, consentement explicite porté par le profil CheckLink), connecteurs VIES/Peppol sans persistance, **Worker publié servant depuis 0.23.0 les routes publiques du registre d'exigences (recherche, vérification CheckLink) et de la mesure consentie (événements anonymes), sans stockage et fail-closed**, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
-| Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
+| Hébergement configuré | Worker Sites servant les assets construits, les routes d’identité VIES/Peppol et, depuis 0.23.0, les routes publiques du registre d’exigences (recherche, vérification CheckLink) et de la mesure consentie (événements anonymes) — secrets `SETTLEMESH_SUPABASE_*` du Worker requis ; l’API Node de validation des factures n’est pas déployée |
 | Langue actuelle | Français |
-| Architecture | HTML, CSS et JavaScript natifs sous `web/` ; Worker sans stockage pour les connecteurs d’identité ; serveur Node local pour l’ensemble de l’API pilote `/api/v1` |
+| Architecture | HTML, CSS et JavaScript natifs sous `web/` ; Worker sans stockage pour les connecteurs d’identité et les routes publiques du registre et de la mesure (logique partagée dans `worker/`, pattern `identity.mjs`) ; serveur Node local pour l’ensemble de l’API pilote `/api/v1` |
 | Promesse courte | **Rendre les factures conformes avant envoi, puis identifier les paiements qui peuvent être compensés.** |
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 147 tests au 8 octobre 2026 |
+| Tests automatisés | 158 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -143,7 +143,7 @@ Légende :
 | Lots | Jusqu'à 20 fichiers, 20 Mo chacun | Opérationnel | Traitement séquentiel dans le navigateur |
 | Rapports | TXT, JSON et CSV | Opérationnel | Pas de signature ni piste d'audit serveur |
 | Historique | Recherche, filtre, export et suppression locale | Opérationnel | Champs minimisés, 100 résultats et 30 jours maximum dans le navigateur ; diagnostic détaillé limité à la session |
-| Mesure pilote | Compteurs d’activation agrégés, export JSON et remise à zéro | Opérationnel | Stockage local ; **télémétrie serveur consentie, minimisée et anonyme depuis 0.22.0** (`/api/v1/metrics`, consentement explicite porté par le profil, ligne organisation/jour/action/quantité 1) ; aucune ouverture externe des compteurs locaux ni correction inter-session sans consentement |
+| Mesure pilote | Compteurs d’activation agrégés, export JSON et remise à zéro | Opérationnel | Stockage local ; **télémétrie serveur consentie, minimisée et anonyme depuis 0.22.0** (`/api/v1/metrics`, consentement explicite porté par le profil, ligne organisation/jour/action/quantité 1) ; aucune ouverture externe des compteurs locaux ni correction inter-session sans consentement ; le Worker publié accepte aussi l'événement depuis 0.23.0 (même liste blanche, sans stockage, limite par IP) |
 | Intégration | API de validation `/api/v1` | Partiel | Endpoint local authentifié par clé d'organisation ; secrets, quotas et audit persistants ainsi que déploiement de production absents |
 | Netting | Import CSV d'obligations | Opérationnel | 2 Mo et 500 obligations conservées localement |
 | Netting | Compensation bilatérale | Opérationnel | Simulation seulement, accord requis |
@@ -156,7 +156,7 @@ Légende :
 | Identité | Registre d'organisations persistant (hashes, rôles, révocation, quotas) | Partiel | Fichier local ou stockage managé Supabase (`SETTLEMESH_SUPABASE_*`), relus sans redémarrage, clés uniquement hashées ; rôles résolus et renvoyés, API d'administration de clés appliquant la matrice owner/admin/viewer (0.16.0) ; revue RGPD externe requise pour des données réelles |
 | Identité | Membres humains, login/logout, sessions et cookies durcis | Partiel | Stockage managé uniquement (e-mail + mot de passe scrypt, sessions 24 h en table, cookie `HttpOnly`/`SameSite=Lax`, badge `members`) ; **MFA propriétaire TOTP actif depuis 0.18.0** (`/auth/mfa/setup` → `/auth/mfa/enable`, code exigé au login, rattrapage affiché pour un owner sans MFA) ; **connexion et publication d'exigences disponibles dans l'interface depuis 0.20.0** (garde CSRF par en-tête) ; pas de réinitialisation de mot de passe ni de rendu QR, revue RGPD externe requise pour des données personnelles réelles (e-mail salarié) |
 | Identité | Comptes, organisations multi-utilisateurs, rôles | Partiel | Comptes humains par e-mail et rôle disponibles en 0.17.0 ; multi-organisation, invitations, changement/oubli de mot de passe et interface de gestion restent à construire |
-| Réseau | Registre public d'exigences de réception (recherche et vérification sans compte) | Partiel | API et stockage actifs (0.19.0), publication opt-in testée, réponses minimisées ; **interface navigateur active depuis 0.20.0** (recherche dans Sources & règles, publication dans Mon CheckLink, bouton « Vérifier ce CheckLink » chez le fournisseur) ; signature du profil pas encore implémentée |
+| Réseau | Registre public d'exigences de réception (recherche et vérification sans compte) | Partiel | API et stockage actifs (0.19.0), publication opt-in testée, réponses minimisées ; **interface navigateur active depuis 0.20.0** (recherche dans Sources & règles, publication dans Mon CheckLink, bouton « Vérifier ce CheckLink » chez le fournisseur) ; **routes publiques servies aussi par le Worker publié depuis 0.23.0** (recherche et vérification sans compte, sans stockage, fail-closed, parité exacte avec le serveur Node) ; signature du profil pas encore implémentée |
 | Connecteurs | VIES | Opérationnel | Requête explicite sans stockage ; réponse ponctuelle, disponibilité amont et portée juridique limitées |
 | Connecteurs | Peppol Directory | Opérationnel | Recherche exacte limitée à 2/s ; présence d’annuaire distincte de la joignabilité SMP |
 | Connecteurs | PDP/PA et ERP | Prévu | APIs, authentification, quotas et gouvernance à cadrer |
@@ -460,8 +460,10 @@ SettleMesh/
 │   ├── validation/              artefacts XSLT compilés en SEF
 │   └── vendor/                  runtimes PDF.js et SaxonJS pour le navigateur
 ├── worker/
-│   ├── index.js                 routes d’identité, quotas et service des assets
-│   └── identity.mjs             validation des entrées et appels officiels normalisés
+│   ├── index.js                 routes d’identité, de registre et de mesure, quotas et service des assets
+│   ├── identity.mjs             validation des entrées et appels officiels normalisés
+│   ├── requirements.mjs         logique du registre d’exigences, partagée avec le serveur
+│   └── metrics.mjs              logique de la mesure consentie, partagée avec le serveur
 ├── dist/                        artefact Worker généré et ignoré par Git
 │   ├── client/                  copie de web/ pour publication
 │   └── server/                  Worker et configuration des assets
@@ -482,6 +484,19 @@ SettleMesh/
 │   ├── identity.test.js         VIES, Peppol, états et minimisation des réponses
 │   ├── api.test.js              contrat HTTP, confidentialité et limites API
 │   ├── auth.test.js             clés, hashes, rotation et configuration d'organisation
+│   ├── auth-mfa.test.js         MFA TOTP (vecteurs RFC 6238, enrôlement, login)
+│   ├── registry.test.js         registre fichier (rôles, révocation à chaud)
+│   ├── registry-supabase.test.js adaptateur Supabase du registre
+│   ├── registry-admin.test.js   administration des clés (matrice, isolation)
+│   ├── members-sessions.test.js membres, sessions et cookies durcis
+│   ├── failures.test.js         verrouillage progressif du login
+│   ├── requirements.test.js     registre d'exigences (publication opt-in)
+│   ├── requirements-client.test.js client navigateur du registre
+│   ├── metrics-server.test.js   mesure consentie serveur (liste blanche, CSV)
+│   ├── reporting-client.test.js consentement navigateur (zéro octet sans opt-in)
+│   ├── worker-requirements.test.js routes publiques du Worker (parité, fail-closed)
+│   ├── rules.test.js            moteur de packs nationaux (validatePack)
+│   ├── rules-countries.test.js  packs France, Allemagne et Belgique
 │   └── fixtures/                documents de test
 ├── server/
 │   ├── auth.mjs                 génération, configuration et authentification des clés API
@@ -490,7 +505,9 @@ SettleMesh/
 │   ├── members.mjs              membres humains (scrypt) et sessions de 24 h
 │   ├── totp.mjs                 TOTP RFC 6238 et Base32 RFC 4648 (sans dépendance)
 │   ├── admin.mjs                administration des clés (matrice de rôles)
-│   ├── requirements.mjs         registre public d'exigences (liste blanche, vérification CheckLink)
+│   ├── requirements.mjs         réexport de la logique worker/requirements.mjs (registre d'exigences)
+│   ├── metrics.mjs              réexport de la logique worker/metrics.mjs (mesure consentie)
+│   ├── failures.mjs             traqueur d'échecs de login (verrouillage progressif)
 │   ├── server.mjs               HTTP, routage, limites et fichiers statiques
 │   └── validation.mjs           validation serveur EN 16931 / Peppol
 ├── docs/
@@ -535,7 +552,7 @@ Conséquence : toute donnée placée dans le profil est visible par le destinata
 
 Le serveur local expose `GET /api/v1/health`, `POST /api/v1/validate`, `POST /api/v1/identity/vies` et `POST /api/v1/identity/peppol`. La validation reçoit un JSON contenant le XML, un profil optionnel et un nom de source. Elle exige une clé Bearer dont seul le hash SHA-256 est configuré côté serveur, détermine l'organisation depuis cette clé, puis exécute les contrôles produit, EN 16931 et, si applicable, Peppol. La réponse ne contient pas le XML brut et porte `stored: false`.
 
-Le Worker publié n’expose que les deux routes d’identité. Elles sont same-origin, limitées, sans base de données et renvoient une réponse normalisée `verified`, `not_verified` ou `unavailable`. Le pays et le numéro TVA ou l’identifiant Peppol transitent vers la source officielle après un clic explicite. SettleMesh ne met en cache ni la requête ni la réponse.
+Le Worker publié expose les deux routes d’identité et, depuis 0.23.0, trois routes publiques en parité exacte avec le serveur Node : `GET /api/v1/requirements` (recherche des exigences **publiées uniquement**, réponses minimisées), `POST /api/v1/requirements/verify` (verdicts `verified`, `mismatch`, `not_published`, `unknown`) et `POST /api/v1/metrics/events` (événement de mesure consenti, liste blanche `{ organizationId, action, day }`). Toutes sont same-origin, limitées par adresse IP (30/20/30 par minute), sans stockage dans le Worker — les tables `settlemesh_requirements` et `settlemesh_metrics` vivent dans le projet Supabase via les secrets `SETTLEMESH_SUPABASE_*` ; sans secrets, réponse `503` explicite, jamais un succès maquillé. Les mutations authentifiées (publication, administration, validation de factures) restent hors du Worker. Pour l’identité, la réponse normalisée reste `verified`, `not_verified` ou `unavailable`, sans cache de la requête ni de la réponse.
 
 Limites : corps HTTP de validation de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé la validation reste fermée. Les routes d’identité utilisent un délai amont de 8 secondes ; Peppol est limité au mieux à deux recherches par seconde, conformément à sa documentation publique. Aucun endpoint n’ouvre CORS. Le serveur et le Worker appliquent CSP, anti-frame, `nosniff`, politiques referrer/permissions et isolation cross-origin. Le contrat de référence est `docs/openapi.yaml`.
 
@@ -701,7 +718,16 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 147 tests
+### 12.2 Couverture actuelle des 158 tests
+
+`test/worker-requirements.test.js` — 10 tests :
+
+- recherche du Worker : uniquement les profils publiés (`published=eq.true` testé dans l'URL PostgREST), champs minimisés, forme de réponse identique au serveur ;
+- sans secrets Worker → `503 REQUIREMENTS_UNAVAILABLE` sans qu'aucune requête ne parte ; stockage amont en panne → `503` explicite, jamais de succès par défaut ;
+- vérification CheckLink : `verified`, `not_published`, `unknown` distingués, et `mismatch` limité aux champs divergents ;
+- événement de mesure : exactement `{ organizationId, action, day }` inséré, aucune donnée de facture transportée ; action inconnue ou jour futur → `400` sans écriture ;
+- `405` / `415` / `413` selon la méthode, le média et la taille ; frontière explicite des mutations authentifiées (405) ;
+- limite de débit par adresse IP → `429` après 30 recherches en une minute.
 
 `test/reporting-client.test.js` — 3 tests :
 
@@ -916,6 +942,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - tester les deux factures de démonstration ;
 - contrôler le PDF Factur-X de fixture et vérifier la règle nationale de profil : `pass` sur un profil EN 16931, `warning` sur un profil MINIMUM, notice sur EXTENDED-CTC-FR ;
 - avec une clé admin, lister `/api/v1/admin/keys`, créer une clé viewer, la valider, la révoquer par DELETE puis vérifier le `401 API_KEY_REVOKED` à chaud ;
+- publier les exigences (admin/owner), puis depuis le Worker publié — ou à défaut une origine distincte du serveur local — rechercher les exigences publiées, vérifier un CheckLink (`verified`), vérifier qu'un profil non publié répond `not_published`, et vérifier qu'un événement de mesure consenti part vers `POST /api/v1/metrics/events` ;
 - créer un membre owner, activer son MFA (setup puis enable avec le code de l'application), vérifier que le login sans code répond `401 MFA_REQUIRED` et que le changement de mot de passe invalide l'ancien ;
 - contrôler un CII EXTENDED avec sous-lignes (chemin de fer) et vérifier le rapprochement BT-106 ainsi que le signalement d'un ParentLineID orphelin ;
 - vérifier que les diagnostics français affichent les contrôles nationaux : format TVA FR, clé SIREN/SIRET du routage et notice de réforme ;
@@ -1006,7 +1033,8 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | Métriques pilote interprétées comme audience globale | Moyen | Libellés « local », export volontaire et distinction explicite entre CheckLink copié et ouverture externe non mesurée |
 | Réapparition de l'ancienne marque Eurule | Faible | SettleMesh est la marque mère depuis v0.4 ; les anciens profils et données locales restent importables uniquement pour compatibilité |
 | Compromission ou mauvaise isolation d'une clé API pilote | Critique | Clés fortes, hashes uniquement (jamais en clair), comparaison constante, organisation déterminée côté serveur, rotation, révocation et quotas persistés via le registre fichier 0.14.0 ; ne pas déployer avant gestionnaire de secrets, TLS, chiffrement au repos et pentest externe |
-| CheckLink imité par un tiers malveillant (hameçonnage fournisseur) | Critique | Identité de l'acheteur lisible dans le lien et la page, parcours fournisseur sans compte, sans identifiant ni donnée bancaire ; vérification officielle publique d'un CheckLink contre les exigences publiées depuis 0.19.0 (verified/mismatch/not_published/unknown), **et bouton « Vérifier ce CheckLink » visible du fournisseur depuis 0.20.0** ; menace consignée dans `docs/SECURITY.md` | signature du profil dans le lien reste à construire ; sensibiliser à l'origine du lien |
+| CheckLink imité par un tiers malveillant (hameçonnage fournisseur) | Critique | Identité de l'acheteur lisible dans le lien et la page, parcours fournisseur sans compte, sans identifiant ni donnée bancaire ; vérification officielle publique d'un CheckLink contre les exigences publiées depuis 0.19.0 (verified/mismatch/not_published/unknown), **et bouton « Vérifier ce CheckLink » visible du fournisseur depuis 0.20.0** ; menace consignée dans `docs/SECURITY.md` ; signature du profil dans le lien reste à construire et sensibilisation à l'origine du lien à mener |
+| Abus des routes publiques du Worker (recherche, vérification, événements de mesure) | Élevé | Limites par adresse IP (30/20/30 par minute), corps bornés (4/32 Ko), listes blanches strictes, jour futur rejeté et `503` explicite sans secrets ; WAF, plafond de table et purge de `settlemesh_metrics` à prévoir avant production |
 
 ## 15. Journal des décisions
 
@@ -1039,6 +1067,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-08 | Ouvrir la première interface navigateur du registre (étape 2b-3) | Rendre visible le backend dans le produit : recherche dans Sources & règles, publication opt-in dans Mon CheckLink (session membre), et bouton « Vérifier ce CheckLink » vu du fournisseur | Les mutations par session exigent l'en-tête CSRF `X-SettleMesh-CSRF` (impossible à forger entre sites avec SameSite=Lax), testé au serveur et au client ; le publish UI recharge le profil courant entier (rél. vérifié : 201 puis `verified` en navigateur, 0 erreur console) ; signature du profil du lien reste à construire |
 | 2026-10-08 | Verrouiller progressivement le login (5 échecs / 10 min par IP+e-mail) | Fermer le risque résiduel « brute force ciblé » du modèle de menace avec des moyens locaux, sans introduire d'énumération (message verrouillé distinct du message identifiants) | `429 LOGIN_LOCKED` après 5 échecs, fenêtre 10 min, traqueur en mémoire borné et purge, réinitialisé au succès ; par processus : protection distribuée et retards aléatoires restent à ajouter avant exposition |
 | 2026-10-08 | **Décision de valeurs (au nom de l'humain)** : accepter une télémétrie d'activation consentie, minimisée et anonyme | L'acheteur doit pouvoir voir la valeur réelle de son CheckLink (fournisseurs actifs, factures contrôlées, factures prêtes) sans espionner personne : consentement explicite coché dans le profil, transporté dans le lien, ligne serveur réduite à organisation/jour/action/quantité 1 — rien qui puisse rattacher un événement à une facture ou une personne | `POST /api/v1/metrics/events` (sans compte, liste blanche stricte, jour futur refusé, limite IP) et lecture agrégée admin/owner (`GET /api/v1/metrics`, export CSV neutralisé) ; sans consentement, zéro octet ne quitte le navigateur fournisseur (invariant testé) ; fournisseurs identifiables, cookies de mesure, périodes sous le jour, tiers et interface de lecture restent hors périmètre sans nouvelle décision ; le SQL de la table `public.settlemesh_metrics` reste à exécuter par l'humain |
+| 2026-10-08 | Servir les routes publiques du registre et de la mesure consentie depuis le Worker publié (étape 7 du pack, volet hébergement) | Rendre le pilote utilisable sans serveur local : un fournisseur doit pouvoir chercher et vérifier des exigences sur l'URL publique, et la mesure consentie doit être collectée depuis le Site publié | Logique partagée dans `worker/requirements.mjs` et `worker/metrics.mjs` (pattern `identity.mjs` : le serveur en reexport, zéro duplication) ; routes `GET /api/v1/requirements`, `POST /api/v1/requirements/verify` et `POST /api/v1/metrics/events` en parité exacte avec le serveur Node ; secrets `SETTLEMESH_SUPABASE_*` du Worker exigés, `503` explicite sinon, jamais de succès maquillé ; mutations authentifiées exclues du Worker (405 avec frontière explicite) ; limites par IP 30/20/30 par minute ; 10 tests `worker-requirements.test.js` |
 
 ## 16. Questions ouvertes à trancher
 
