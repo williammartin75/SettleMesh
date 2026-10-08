@@ -10,6 +10,7 @@ import { createSupabaseMembers, verifyPassword, hashPassword } from "./members.m
 import { createSupabaseRequirements, sanitizeRequirementProfile, verifyAgainstPublished } from "./requirements.mjs";
 import { verifyTotp, generateTotpSecret } from "./totp.mjs";
 import { handleAdminRequest } from "./admin.mjs";
+import { createFailureTracker } from "./failures.mjs";
 import { validateApiInvoice } from "./validation.mjs";
 import { IdentityInputError, verifyPeppol, verifyVies } from "../worker/identity.mjs";
 
@@ -125,6 +126,7 @@ export function createSettleMeshServer({
       serviceKey: process.env.SETTLEMESH_SUPABASE_SERVICE_KEY
     })
     : null);
+  const loginFailures = createFailureTracker({ limit: 5, windowMs: 600_000 });
   const requirementsStore = requirementsStoreOption || (supabaseRegistry
     ? createSupabaseRequirements({
       projectRef: process.env.SETTLEMESH_SUPABASE_PROJECT_REF,
@@ -223,9 +225,20 @@ export function createSettleMeshServer({
         if (url.pathname === "/api/v1/auth/login" && request.method === "POST") {
           try {
             const payload = await readJson(request);
+            const attemptKey = `${request.socket.remoteAddress || "inconnu"}|${String(payload?.email || "").trim().toLowerCase()}`;
+            if (loginFailures.blocked(attemptKey)) {
+              const seconds = loginFailures.secondsLeft(attemptKey);
+              const failure = apiError(requestId, "LOGIN_LOCKED", `Trop de tentatives infructueuses. Réessayez dans ${seconds} secondes.`, 429);
+              return jsonResponse(response, 429, failure.body, ipRateHeaders);
+            }
             const member = await membersStore.findMemberByEmail(payload?.email);
             const passwordOk = member && verifyPassword(payload?.password || "", member.password_hash);
             if (!passwordOk) {
+              const attempt = loginFailures.attempt(attemptKey);
+              if (attempt.blocked) {
+                const failure = apiError(requestId, "LOGIN_LOCKED", `Trop de tentatives infructueuses. Réessayez dans ${loginFailures.secondsLeft(attemptKey)} secondes.`, 429);
+                return jsonResponse(response, 429, failure.body, ipRateHeaders);
+              }
               const failure = apiError(requestId, "INVALID_CREDENTIALS", "Identifiants invalides.", 401);
               return jsonResponse(response, 401, failure.body, ipRateHeaders);
             }
@@ -233,6 +246,7 @@ export function createSettleMeshServer({
               const failure = apiError(requestId, "MFA_REQUIRED", "Un code d'authentification valide est requis pour ce compte.", 401);
               return jsonResponse(response, 401, failure.body, ipRateHeaders);
             }
+            loginFailures.reset(attemptKey);
             const session = await membersStore.createSession({ memberId: member.id, organizationId: member.organization_id, role: member.role });
             return jsonResponse(response, 200, {
               schema: "settlemesh-session", apiVersion: API_VERSION, requestId,

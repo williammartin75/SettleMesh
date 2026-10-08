@@ -7,7 +7,7 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.20.0` |
+| Version du code | `0.21.0` |
 | État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud) et API d'administration des clés appliquant la matrice de rôles, comptes humains e-mail + mot de passe scrypt avec sessions serveur de 24 h, cookies durcis et MFA propriétaire TOTP sans dépendance, registre public d'exigences de réception (recherche et vérification de CheckLink sans compte) **et première interface navigateur** (recherche, publication opt-in, bouton de vérification fournisseur), métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 132 tests au 8 octobre 2026 |
+| Tests automatisés | 135 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -700,7 +700,13 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 132 tests
+### 12.2 Couverture actuelle des 135 tests
+
+`test/failures.test.js` — 3 tests :
+
+- verrou progressif ouvert au seuil, expiration avec la fenêtre ;
+- réinitialisation au succès, sans pollution entre couples ip/e-mail ;
+- HTTP : 5 échecs → `401 INVALID_CREDENTIALS` puis `429 LOGIN_LOCKED` même avec le bon mot de passe, autre e-mail non affecté.
 
 `test/requirements.test.js` — 7 tests :
 
@@ -1011,6 +1017,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-08 | Activer le MFA propriétaire TOTP RFC 6238 (étape 2b-2) | Renforcer les comptes sensibles avec un second facteur sans dépendance nouvelle ; enrôlement en deux temps (setup inactif, puis validation par code) pour éviter l'auto-verrouillage | `/auth/mfa/setup` + `/auth/mfa/enable` (fenêtre ±1 pas, comparaison temps constant) + `/auth/mfa/disable` (mot de passe requis) + `/auth/password` (changement authentifié) ; au login un code valide est exigé (`401 MFA_REQUIRED`), le rattrapage d'un owner sans MFA est affiché (`mfaEnrollmentRequired`) ; le compteur HOTP est codé sur 8 octets, validé par les vecteurs RFC 6238 ; QR code restant à rendre en 2b-3, revue RGPD externe requise avant données personnelles réelles |
 | 2026-10-08 | Créer le registre public d'exigences de réception (étape 4 du pack) | Permettre à un fournisseur de trouver et vérifier les exigences d'un client sans compte, et réduire la menace « CheckLink imité » par une vérification officielle publique | Table `public.settlemesh_requirements` (RLS sans policy), publication opt-in explicite jamais silencieuse, matrice admin/owner et organisation résolue côté serveur, recherche minimisée sans compte, vérification `verified/mismatch/not_published/unknown` avec format CheckLink inchangé ; interface navigateur de recherche et signature du profil restent à construire |
 | 2026-10-08 | Ouvrir la première interface navigateur du registre (étape 2b-3) | Rendre visible le backend dans le produit : recherche dans Sources & règles, publication opt-in dans Mon CheckLink (session membre), et bouton « Vérifier ce CheckLink » vu du fournisseur | Les mutations par session exigent l'en-tête CSRF `X-SettleMesh-CSRF` (impossible à forger entre sites avec SameSite=Lax), testé au serveur et au client ; le publish UI recharge le profil courant entier (rél. vérifié : 201 puis `verified` en navigateur, 0 erreur console) ; signature du profil du lien reste à construire |
+| 2026-10-08 | Verrouiller progressivement le login (5 échecs / 10 min par IP+e-mail) | Fermer le risque résiduel « brute force ciblé » du modèle de menace avec des moyens locaux, sans introduire d'énumération (message verrouillé distinct du message identifiants) | `429 LOGIN_LOCKED` après 5 échecs, fenêtre 10 min, traqueur en mémoire borné et purge, réinitialisé au succès ; par processus : protection distribuée et retards aléatoires restent à ajouter avant exposition |
 
 ## 16. Questions ouvertes à trancher
 
