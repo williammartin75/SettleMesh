@@ -50,6 +50,8 @@ Puis ouvrir `http://127.0.0.1:4173`. Le port par défaut est `4173` et peut êtr
 
 La commande `api:key` affiche une clé une seule fois et l'objet de configuration contenant uniquement son hash SHA-256. Placer cet objet dans la variable `SETTLEMESH_API_KEYS` avant de lancer le serveur. Aucun secret ne doit être ajouté au dépôt ou au CheckLink.
 
+Depuis 0.14.0, la configuration des clés peut aussi être un **fichier de registre** persistant : `npm run registry:key -- <organisation> [owner|admin|viewer] [chemin]` ajoute une clé (hash uniquement) dans le fichier pointé par `SETTLEMESH_REGISTRY_FILE`. Le serveur relit le fichier à chaud : une clé ajoutée ou révoquée prend effet sans redémarrage, et une clé révoquée reçoit `401 API_KEY_REVOKED`. Le fichier ne contient jamais de clé brute.
+
 Le serveur local expose également `GET /api/v1/health`, `POST /api/v1/validate`, `POST /api/v1/identity/vies` et `POST /api/v1/identity/peppol`. Le contrat, les exemples et les limites de sécurité sont décrits dans [`docs/API.md`](./docs/API.md) et [`docs/openapi.yaml`](./docs/openapi.yaml). Le Site publié embarque uniquement les deux routes d’identité dans un Worker sans stockage ; l’API de validation de factures reste locale. Les clés et quotas de validation sont encore configurés en mémoire : malgré la revue interne initiale, un gestionnaire de secrets, une révocation persistante, TLS, des contrôles d'infrastructure et un pentest externe restent nécessaires avant son exposition Internet.
 
 ## Démonstration

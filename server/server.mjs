@@ -4,6 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { authenticateApiKey, parseApiKeyConfiguration } from "./auth.mjs";
+import { createFileRegistry } from "./registry.mjs";
 import { validateApiInvoice } from "./validation.mjs";
 import { IdentityInputError, verifyPeppol, verifyVies } from "../worker/identity.mjs";
 
@@ -84,10 +85,13 @@ export function createSettleMeshServer({
   logger = console,
   rateLimit = 120,
   apiKeys = parseApiKeyConfiguration(),
+  registryFile = process.env.SETTLEMESH_REGISTRY_FILE || "",
   identityFetch = fetch
 } = {}) {
   const normalizedRoot = resolve(root);
   const credentials = parseApiKeyConfiguration(JSON.stringify(apiKeys));
+  const registry = registryFile ? createFileRegistry(registryFile) : null;
+  const credentialsSource = () => (registry ? registry.credentials() : credentials);
   const consumeIpRate = createRateLimiter(60_000);
   const consumeOrganizationRate = createRateLimiter(60_000);
   const consumePeppolRate = createRateLimiter(1_000);
@@ -107,7 +111,7 @@ export function createSettleMeshServer({
         return jsonResponse(response, 200, {
           schema: "settlemesh-api-health", apiVersion: API_VERSION, status: "ok",
           validators: { en16931: "1.3.16", peppol: "3.0.21" },
-          authentication: { validate: "bearer-api-key", identity: "same-origin", configured: credentials.length > 0 },
+          authentication: { validate: "bearer-api-key", identity: "same-origin", configured: credentialsSource().length > 0, registry: Boolean(registry) },
           identitySources: { vies: "live", peppolDirectory: "live", persistence: false },
           limits: { requestBytes: MAX_API_BODY_BYTES, xmlBytes: 1024 * 1024, ipRequestsPerMinute: rateLimit },
           persistence: false
@@ -153,7 +157,7 @@ export function createSettleMeshServer({
           return jsonResponse(response, error.status, error.body, ipRateHeaders);
         }
 
-        const authentication = authenticateApiKey(request.headers.authorization, credentials);
+        const authentication = authenticateApiKey(request.headers.authorization, credentialsSource());
         if (!authentication.ok) {
           const error = apiError(requestId, authentication.code, authentication.message, authentication.statusCode);
           const challenge = authentication.statusCode === 401 ? { "WWW-Authenticate": 'Bearer realm="SettleMesh API"' } : {};
@@ -172,7 +176,7 @@ export function createSettleMeshServer({
           const result = await validateApiInvoice(payload);
           return jsonResponse(response, 200, {
             schema: "settlemesh-validation-response", apiVersion: API_VERSION, requestId,
-            processedAt: new Date().toISOString(), organizationId, stored: false, result
+            processedAt: new Date().toISOString(), organizationId, organizationRole: authentication.credential.role, stored: false, result
           }, { ...organizationRateHeaders, Vary: "Authorization" });
         } catch (error) {
           const status = error.statusCode || 500;

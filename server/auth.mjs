@@ -18,7 +18,9 @@ export function hashApiKey(apiKey) {
   return createHash("sha256").update(String(apiKey || ""), "utf8").digest("hex");
 }
 
-export function createApiCredential({ organizationId, keyId, requestsPerMinute = DEFAULT_REQUESTS_PER_MINUTE } = {}) {
+export function createApiCredential({ organizationId, keyId, role = "owner", requestsPerMinute = DEFAULT_REQUESTS_PER_MINUTE } = {}) {
+  const ROLES = new Set(["owner", "admin", "viewer"]);
+  if (!ROLES.has(role)) throw configurationError("Le rôle doit être owner, admin ou viewer.");
   const normalizedOrganizationId = assertIdentifier(organizationId, "organizationId");
   const normalizedKeyId = assertIdentifier(keyId, "keyId");
   const limit = Number(requestsPerMinute);
@@ -32,6 +34,7 @@ export function createApiCredential({ organizationId, keyId, requestsPerMinute =
       organizationId: normalizedOrganizationId,
       keyId: normalizedKeyId,
       keyHash: hashApiKey(apiKey),
+      role,
       requestsPerMinute: limit
     }
   };
@@ -74,7 +77,7 @@ export function parseApiKeyConfiguration(raw = process.env.SETTLEMESH_API_KEYS |
     seenKeyIds.add(keyId);
     seenHashes.add(keyHash);
     organizationLimits.set(organizationId, requestsPerMinute);
-    return Object.freeze({ organizationId, keyId, keyHash, requestsPerMinute });
+    return Object.freeze({ organizationId, keyId, keyHash, role: "owner", requestsPerMinute, revokedAt: null });
   });
   return Object.freeze(credentials);
 }
@@ -112,11 +115,15 @@ export function authenticateApiKey(authorizationHeader, credentials) {
   if (!authenticated) {
     return { ok: false, statusCode: 401, code: "INVALID_API_KEY", message: "La clé API est invalide." };
   }
+  if (authenticated.revokedAt) {
+    return { ok: false, statusCode: 401, code: "API_KEY_REVOKED", message: "La clé API a été révoquée." };
+  }
   return {
     ok: true,
     credential: {
       organizationId: authenticated.organizationId,
       keyId: authenticated.keyId,
+      role: authenticated.role || "owner",
       requestsPerMinute: authenticated.requestsPerMinute
     }
   };

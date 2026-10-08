@@ -47,6 +47,7 @@ Actifs à protéger : contenu des factures, identifiants fiscaux, noms de partie
 | Pays + numéro TVA | Mémoire navigateur, Worker et VIES | Durée de la requête côté SettleMesh ; politique propre de VIES côté source | Clic explicite « Vérifier via VIES » |
 | Identifiant participant Peppol | Mémoire navigateur, Worker et Peppol Directory | Durée de la requête côté SettleMesh ; politique propre d’OpenPeppol côté source | Clic explicite « Rechercher dans Peppol » |
 | Hash de clé API | Variable de configuration serveur | Durée du processus | Non |
+| Hashes, rôles, quotas et révocations des clés API (registre persistant 0.14.0) | Fichier local `settlemesh-registry-1` désigné par `SETTLEMESH_REGISTRY_FILE` | Jusqu'à suppression du fichier ; relu à chaud, jamais de clé brute | Non |
 
 L'historique persistant ne contient ni XML brut, ni acheteur, ni endpoint, ni référence de commande, ni détail des contrôles. Le dernier diagnostic complet n'est plus écrit dans `localStorage` à partir de la version `0.8.0`.
 

@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.13.0` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.14.0` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant local (hashes, rôles, révocation, quotas ; adaptateur plateforme managée à venir), métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 93 tests au 8 octobre 2026 |
+| Tests automatisés | 102 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -136,7 +136,7 @@ Légende :
 | Facture | Précontrôle structurel PDF/A-3 | Partiel | XMP, profil Factur-X, nom du XML et association `/AF` ; validation ISO exhaustive veraPDF encore absente |
 | Normes | EN 16931 v1.3.16 UBL/CII | Opérationnel | Artefacts à surveiller et mettre à jour |
 | Normes | Peppol BIS Billing 3.0.21 | Opérationnel | Déclenché sur les UBL déclarant un profil Peppol |
-| Normes | EN 16931 révisée | À surveiller | La révision EN 16931-1:2026 a été publiée ; les artefacts runtime restent 1.3.16, leur mise à jour est à planifier avec Contraticiel/Framework CTC du parcours France |
+| Normes | EN 16931 révisée | Point de veille, à jour | L'artefact de validation EC le plus récent est la 1.3.16 (avril 2026), déjà vendroie et exécutée ; Peppol BIS 3.0.21 (mai 2026) l'intègre également. La révision CEN EN 16931-1:2026 n'a pas encore d'artefacts runtime publiés : surveiller CEN/TC 434 et OpenPeppol |
 | Règles acheteur | Entité, TVA, devise, références, endpoint | Opérationnel | Les règles doivent rester explicables et déterministes |
 | Règles nationales | Packs France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0 | Partiel | Déclaratifs, datés et sourcés ; IT/ES/PL et le reste du périmètre français à venir |
 | Résultat | Score, statut et corrections | Opérationnel | Score produit, pas une certification officielle |
@@ -153,7 +153,7 @@ Légende :
 | Netting | Scénario de cut-off daté | Opérationnel | Simulation locale uniquement ; les obligations postérieures au cut-off ou sans échéance exploitable sont différées et comptées séparément, jamais supprimées ni requalifiées |
 | Netting | Positions nettes et paiements résiduels | Opérationnel | Aucun ordre de paiement n'est émis |
 | Netting | Export des propositions et allocations | Opérationnel | Document de travail, pas un accord signé |
-| Identité | Clés API d'organisation | Partiel | Hashes et quotas en mémoire ; aucun compte, session, membre ou rôle utilisateur |
+| Identité | Registre d'organisations persistant (hashes, rôles, révocation, quotas) | Partiel | Fichier local relu sans redémarrage, clés uniquement hashées ; rôles résolus et renvoyés, aucun compte, session, membre ou interface d'administration humaine ; adaptateur plateforme managée (Supabase) à brancher |
 | Identité | Comptes, organisations multi-utilisateurs, rôles | Prévu | Nécessite stockage d'identité, sessions, invitations et droits persistants |
 | Réseau | Invitations et contreparties vérifiées | Prévu | Condition du vrai effet réseau |
 | Connecteurs | VIES | Opérationnel | Requête explicite sans stockage ; réponse ponctuelle, disponibilité amont et portée juridique limitées |
@@ -467,6 +467,7 @@ SettleMesh/
 ├── scripts/
 │   ├── serve.mjs                lancement de l'application et de l'API locale, port 4173 par défaut, surchargeable par la variable d'environnement PORT
 │   ├── create-api-key.mjs       génération locale d'une clé et de son hash de configuration
+│   ├── registry-key.mjs         ajout d'une clé hashée au fichier de registre, avec rôle
 │   ├── build-site-worker.mjs    construction déterministe de dist/
 │   └── build-validation-assets.mjs
 │                                compilation/copie des moteurs normatifs
@@ -482,6 +483,7 @@ SettleMesh/
 │   └── fixtures/                documents de test
 ├── server/
 │   ├── auth.mjs                 génération, configuration et authentification des clés API
+│   ├── registry.mjs             registre d'organisations persistant (hashes, rôles, révocation)
 │   ├── server.mjs               HTTP, routage, limites et fichiers statiques
 │   └── validation.mjs           validation serveur EN 16931 / Peppol
 ├── docs/
@@ -528,7 +530,9 @@ Le serveur local expose `GET /api/v1/health`, `POST /api/v1/validate`, `POST /ap
 
 Le Worker publié n’expose que les deux routes d’identité. Elles sont same-origin, limitées, sans base de données et renvoient une réponse normalisée `verified`, `not_verified` ou `unavailable`. Le pays et le numéro TVA ou l’identifiant Peppol transitent vers la source officielle après un clic explicite. SettleMesh ne met en cache ni la requête ni la réponse.
 
-Limites : corps HTTP de validation de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé la validation reste fermée. Les routes d’identité utilisent un délai amont de 8 secondes ; Peppol est limité au mieux à deux recherches par seconde, conformément à sa documentation publique. Aucun endpoint n’ouvre CORS. Le serveur et le Worker appliquent CSP, anti-frame, `nosniff`, politiques referrer/permissions et isolation cross-origin. Les secrets, révocations et quotas distribués ne sont pas encore persistants. Le contrat de référence est `docs/openapi.yaml`.
+Limites : corps HTTP de validation de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé la validation reste fermée. Les routes d’identité utilisent un délai amont de 8 secondes ; Peppol est limité au mieux à deux recherches par seconde, conformément à sa documentation publique. Aucun endpoint n’ouvre CORS. Le serveur et le Worker appliquent CSP, anti-frame, `nosniff`, politiques referrer/permissions et isolation cross-origin. Le contrat de référence est `docs/openapi.yaml`.
+
+Depuis la version 0.14.0, les clés peuvent provenir de deux sources équivalentes : la variable `SETTLEMESH_API_KEYS` (configuration mémoire historique) ou le fichier de registre pointé par `SETTLEMESH_REGISTRY_FILE`. Ce fichier ne contient jamais de clé brute : organisation, `keyId`, hash SHA-256, rôle (`owner`/`admin`/`viewer`), quota et horodatage `revokedAt`. Une modification du fichier est reprise à chaud sans redémarrage ; une clé révoquée reçoit immédiatement `401 API_KEY_REVOKED`. Le rôle résolu par le serveur est renvoyé dans la réponse de validation sous `organizationRole`. Le registre reste local : aucun contenu de facture ni obligation ne transite par lui, et l'adaptateur plateforme managée (Supabase) viendra remplacer le stockage fichier sans changer le contrat.
 
 ## 8. Invariants à ne jamais casser
 
@@ -685,7 +689,19 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 93 tests
+### 12.2 Couverture actuelle des 102 tests
+
+`test/registry.test.js` — 9 tests :
+
+- document de registre valide : entrées figées avec rôle, quota et révocation ;
+- refus d'un hash en clair, d'un rôle inconnu, d'une clé dupliquée et d'un doublon de hash ;
+- clé révoquée : `API_KEY_REVOKED` et non un refus générique ;
+- configuration d'environnement historique acceptée avec rôle owner par défaut ;
+- relecture du fichier de registre après modification, sans redémarrage ;
+- revocation appliquée par le serveur sans redémarrage, rôle renvoyé dans la réponse ;
+- fichier illisible ou de schéma faux rejeté ;
+- écriture atomique sans fichier temporaire résiduel ;
+- organisation sans clé refusée.
 
 `test/core.test.js` — 13 tests :
 
@@ -837,8 +853,8 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 ### P0 — rendre le pilote crédible
 
 - [x] Adopter SettleMesh comme marque mère, SettleMesh CheckLink comme module de conformité et SettleMesh Net comme module de compensation, avec migration rétrocompatible des données Eurule.
-- [ ] Ajouter comptes, sessions et organisations multi-utilisateurs avec membres et rôles ; l'API possède déjà une authentification technique par clé d'organisation. Décision du 8 octobre 2026 : registre d'organisations persisté en deux étapes (« option C échelonné ») — v0.11 : organisations, membres, rôles et clés hashées persistés sur une plateforme Postgres managée communautaire (Supabase) sans restriction de région, le choix de la région restant libre ; v0.12 : sessions humaines, cookies durcis et MFA propriétaire. Aucun contenu de facture ne transite vers ce registre. Si des données personnelles du périmètre de l'Europe sont traitées, les obligations RGPD (transferts internationaux, SCC, DPA) s'appliquent indépendamment du lieu d'hébergement et restent documentées par la revue externe.
-- [ ] Stocker profils et journaux côté serveur avec chiffrement, rétention et droits d'accès.
+- [ ] Ajouter comptes, sessions et organisations multi-utilisateurs avec membres et rôles ; l'API possède déjà une authentification technique par clé d'organisation. Décision du 8 octobre 2026 : registre d'organisations persisté en deux étapes (« option C échelonné ») — v0.14 : organisations, membres, rôles, révocation et quotas persistés localement (fichier `settlemesh-registry-1` relu à chaud, `npm run registry:key`), adaptateur Postgres managé communautaire (Supabase) restant à brancher sans changement de contrat ; v0.15+ : sessions humaines, cookies durcis et MFA propriétaire. Aucun contenu de facture ne transite vers ce registre. Si des données personnelles du périmètre de l'Europe sont traitées, les obligations RGPD (transferts internationaux, SCC, DPA) s'appliquent indépendamment du lieu d'hébergement et restent documentées par la revue externe.
+- [ ] Stocker profils et journaux côté serveur avec chiffrement, rétention et droits d'accès ; distinct du registre d'organisations (clés, rôles, révocation, quotas) qui est persisté localement depuis 0.14.0 — aucun profil ni journal de facturation ne transite par le registre.
 - [x] Créer une API de validation versionnée avec contrat OpenAPI, validation serveur et absence de persistance ; le déploiement reste lié à la gestion persistante des secrets, quotas et audits.
 - [x] Protéger l'API pilote avec clés Bearer hashées, organisation déterminée côté serveur, rotation et quotas en mémoire ; secrets et quotas persistants restent requis avant production.
 - [ ] Ajouter les contrôles nationaux du premier marché cible. Réalisé le 8 octobre 2026 : moteur de packs déclaratifs versionnés + packs France 1.3.0 (TVA, SIREN/SIRET, profil Factur-X, chemin de fer, notices), Allemagne 1.0.0 (TVA DE, Leitweg-ID BT-10 sur XRechnung) et Belgique 1.0.0 (TVA BE, communication structurée BT-83) ; la mise à jour des artefacts vers la révision EN 16931-1:2026, l'Italie, l'Espagne et la Pologne (KSeF) restent à prioriser.
@@ -925,6 +941,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-08 | Ajouter un scénario de cut-off daté à la simulation Net | Permettre au trésorier de borner la simulation à une date sans altérer les positions nettes ni présumer d'une extinction juridique anticipée | Les obligations hors cut-off sont différées et signalées par un compteur distinct, la date doit être `AAAA-MM-JJ`, l'export CSV trace le scénario via `scenario_cutoff` ; périodes récurrentes, workflow serveur et scénarios multi-parties restent en P1 |
 | 2026-10-08 | Adopter un registre d'organisations persisté en deux étapes, sur plateforme Postgres managée | Rester local dans le MVP tout en préparant l'isolation multi-clients ; réutiliser la clé d'organisation hashée déjà testée | Étape 1 (v0.11) : organisations, membres, rôles et révocation persistés, quotas persistants, tests d'isolation inter-organisation ; étape 2 (v0.12) : sessions humaines durcies et MFA propriétaire ; aucune facture ni obligation ne transite vers ce registre ; aucune région imposée par le produit, mais DPA, transferts internationaux et avis RGPD externes restent requis avant données réelles |
 | 2026-10-08 | Introduire des packs de règles nationales déclaratifs et versionnés | Rendre les exigences par pays additives et modulaires sans dépendre d'un seul marché national : factures européennes traitables depuis n'importe où | Packs France 1.3.0 (TVA, SIREN/SIRET, profil Factur-X, chemin de fer, notices), Allemagne 1.0.0 (TVA, Leitweg-ID BT-10 déclenchée sur XRechnung, clé Mod 97-10) et Belgique 1.0.0 (TVA, communication structurée BT-83, clé Mod 97), source toujours citée, `validatePack` rejette un pack incomplet ; Italie, Espagne, Pologne (KSeF) et la mise à jour EN 16931-1:2026 restent à prioriser |
+| 2026-10-08 | Rendre le registre d'organisations persistant localement avant l'adaptateur plateforme managée | Fermer les portes production « révocation et quotas persistants » avec les moyens disponibles, tout en préparant la migration Supabase sans changer le contrat | Fichier `settlemesh-registry-1` : hashes SHA-256 uniquement, rôles owner/admin/viewer, revokedAt, quotas ; relecture à chaud (mtime), CLI `npm run registry:key` à écriture atomique, rôle renvoyé dans la réponse de validation ; comptes humains, sessions et MFA restent en étape 2, pentest et revue RGPD externes toujours requis |
 
 ## 16. Questions ouvertes à trancher
 
