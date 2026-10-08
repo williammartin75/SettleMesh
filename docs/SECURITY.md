@@ -80,7 +80,7 @@ L'historique persistant ne contient ni XML brut, ni acheteur, ni endpoint, ni r�
 | WSTG-CLNT-03 | Moyen, corrigé `0.8.0` | historique auparavant trop détaillé dans `localStorage` | liste blanche, rétention de 30 jours et absence de `lastResult` persistant |
 | WSTG-INPV-07 | Faible, corrigé `0.8.0` | rejet `DOCTYPE` harmonisé entre navigateur et API | conserver le test à chaque nouveau format XML |
 | WSTG-ATHN-01 | Élevé, ouvert | aucune identité humaine, session ou rôle | acceptable pour le MVP local ; obligatoire avant données partagées côté serveur |
-| WSTG-ATHZ-01 | Élevé, ouvert | aucune autorisation objet/membre car aucun registre serveur n'existe | concevoir une matrice d'accès et des tests d'isolation avant synchronisation |
+| WSTG-ATHZ-01 | Élevé, en partie corrigé `0.16.0` | matrice de rôles owner/admin/viewer appliquée par l'API d'administration des clés, isolation des organisations testée ; aucun objet de facturation accessible par cette API | sessions humaines, membres et rattachement utilisateur-clé restent à concevoir |
 | WSTG-SESS-01 | Élevé, ouvert | aucune gestion de session applicative | choisir un fournisseur d'identité, cookies `Secure`/`HttpOnly`/`SameSite` et rotation avant production |
 | WSTG-CRYP-01 | Élevé, ouvert | TLS non terminé par l'API locale | exiger TLS 1.2+ au proxy, gestionnaire de secrets et chiffrement au repos en production |
 | WSTG-BUSL-01 | Critique, maîtrisé dans le MVP | la simulation Net pourrait être prise pour une exécution | aucune extinction, aucun ordre et aucun fonds ; accord humain et analyse juridique restent obligatoires |

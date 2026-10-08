@@ -68,6 +68,129 @@ paths:
           $ref: '#/components/responses/ApiError'
         '503':
           $ref: '#/components/responses/ApiError'
+  /admin/keys:
+    get:
+      operationId: listAdminKeys
+      summary: Lister les clés de l'organisation authentifiée
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Clés de l'organisation (sans hash)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminKeysResponse'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '403':
+          description: Rôle insuffisant (viewer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Registre persistant requis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: createAdminKey
+      summary: Générer une nouvelle clé pour l'organisation authentifiée (rôle au plus élevé du demandeur)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminKeyCreateRequest'
+      responses:
+        '201':
+          description: Clé créée ; apiKey renvoyée une seule fois
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminKeysResponse'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '403':
+          $ref: '#/components/responses/ApiError'
+        '409':
+          $ref: '#/components/responses/ApiError'
+  /admin/keys/{keyId}:
+    patch:
+      operationId: patchAdminKey
+      summary: Changer le rôle (owner uniquement) ou revokedAt (admin/owner) d'une clé de l'organisation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminKeyPatchRequest'
+      responses:
+        '200':
+          description: Clés à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminKeysResponse'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '403':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+    delete:
+      operationId: revokeAdminKey
+      summary: Révoquer immédiatement une clé de l'organisation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Clé révoquée (revokedAt horodaté)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminKeysResponse'
+        '404':
+          $ref: '#/components/responses/ApiError'
+  /admin/organization:
+    patch:
+      operationId: patchAdminOrganization
+      summary: Ajuster le quota de l'organisation authentifiée (owner uniquement)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminOrganizationPatchRequest'
+      responses:
+        '200':
+          description: Clés avec le quota appliqué
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminKeysResponse'
+        '403':
+          $ref: '#/components/responses/ApiError'
   /identity/vies:
     post:
       operationId: checkVatIdentity
@@ -304,6 +427,52 @@ components:
         message: { type: string }
         fix: { type: string }
         field: { type: string }
+    AdminKeysResponse:
+      type: object
+      required: [schema, apiVersion, requestId, organizationId, keys]
+      properties:
+        schema: { const: settlemesh-admin-keys }
+        apiVersion: { const: v1 }
+        requestId: { type: string, format: uuid }
+        organizationId: { type: string }
+        apiKey:
+          type: string
+          description: Renvoyée uniquement à la création (POST), une seule fois ; jamais stockée.
+        notice: { type: string }
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminKeyEntry'
+    AdminKeyEntry:
+      type: object
+      required: [keyId, role, requestsPerMinute, revokedAt]
+      properties:
+        keyId: { type: string }
+        role: { enum: [owner, admin, viewer] }
+        requestsPerMinute: { type: integer, minimum: 1, maximum: 10000 }
+        revokedAt: { type: [string, 'null'], format: date-time }
+    AdminKeyCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { enum: [viewer, admin, owner] }
+        keyId:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{1,63}$'
+          description: Généré si absent. Globalement unique dans le registre.
+    AdminKeyPatchRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        role: { enum: [owner, admin, viewer] }
+        revokedAt: { type: [string, 'null'], format: date-time }
+    AdminOrganizationPatchRequest:
+      type: object
+      additionalProperties: false
+      required: [requestsPerMinute]
+      properties:
+        requestsPerMinute: { type: integer, minimum: 1, maximum: 10000 }
     ErrorResponse:
       type: object
       required: [schema, apiVersion, requestId, error]
@@ -320,10 +489,13 @@ components:
               description: >-
                 Codes observés : AUTH_NOT_CONFIGURED (503), AUTH_REQUIRED (401),
                 INVALID_API_KEY (401), API_KEY_REVOKED (401, clé avec revokedAt
-                dans le registre), RATE_LIMITED et UPSTREAM_RATE_LIMITED (429),
-                INVALID_JSON, INVALID_VAT_COUNTRY, INVALID_VAT_NUMBER,
-                INVALID_PEPPOL_ID, IDENTITY_CHECK_FAILED, METHOD_NOT_ALLOWED,
-                NOT_FOUND, BODY_TOO_LARGE, XML_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
+                dans le registre), FORBIDDEN_ROLE (403), ADMIN_REQUIRES_REGISTRY
+                (409), KEY_NOT_FOUND (404), KEY_ID_UNAVAILABLE (409),
+                INVALID_ADMIN_PAYLOAD (400), UNKNOWN_ADMIN_ROUTE (404),
+                RATE_LIMITED et UPSTREAM_RATE_LIMITED (429), INVALID_JSON,
+                INVALID_VAT_COUNTRY, INVALID_VAT_NUMBER, INVALID_PEPPOL_ID,
+                IDENTITY_CHECK_FAILED, METHOD_NOT_ALLOWED, NOT_FOUND,
+                BODY_TOO_LARGE, XML_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
                 XML_REQUIRED, INVALID_XML, UNSAFE_XML, INVALID_PROFILE,
                 VALIDATION_FAILED.
             message: { type: string }

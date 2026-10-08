@@ -75,7 +75,7 @@ test("le fichier de registre est relu après modification, sans redémarrage", (
 test("une revocation écrite dans le fichier est appliquée par le serveur sans redémarrage", async () => {
   writeRegistryFile(registryPath, baseEntries);
   const server = createSettleMeshServer({ registryFile: registryPath });
-  const listening = await listen(server);
+  const listening = await listen(server, { port: 0 }); // port éphémère : aucun conflit entre fichiers de tests
   const post = async (apiKey) => {
     const response = await fetch(`http://127.0.0.1:${listening.port}/api/v1/validate`, {
       method: "POST",

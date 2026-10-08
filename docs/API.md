@@ -56,6 +56,44 @@ create table if not exists public.settlemesh_registry(
 alter table public.settlemesh_registry enable row level security;
 ```
 
+Avec RLS activée sans policy, seules les requêtes authentifiées par le `service_role` peuvent lire et écrire. La lecture est mise en cache 5 secondes et `GET /api/v1/health` expose `authentication.registry` et `authentication.supabase`. Migrer ensuite un registre local : `npm run registry:push -- chemin\vers\settlemesh-registry.json` (mise à priorité fichier local > Supabase > `SETTLEMESH_API_KEYS`). La révocation reste appliquée sans redémarrage.
+
+## Administration des clés (0.16.0)
+
+`/api/v1/admin/*` exige l'authentification Bearer et un registre persistant. La matrice de rôles est appliquée serveur :
+
+| Opération | Rôle requis | Effet |
+|---|---|---|
+| `GET /admin/keys` | admin ou owner | liste des clés de l'organisation authentifiée (keyId, rôle, quota, revokedAt) |
+| `POST /admin/keys` | admin ou owner | génère une clé pour l'organisation (rôle au plus élevé du demandeur) ; clé brute renvoyée une seule fois |
+| `PATCH /admin/keys/{keyId}` | owner (rôle) · admin ou owner (`revokedAt`) | change le rôle ou la révocation d'une clé |
+| `DELETE /admin/keys/{keyId}` | admin ou owner | révoke immédiatement la clé |
+| `PATCH /admin/organization` | owner | ajuste le quota de l'organisation (1 à 10 000 requêtes/minute) |
+
+```json
+{ "role": "viewer" }
+```
+
+```powershell
+Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:4173/api/v1/admin/keys' -Headers @{ Authorization = "Bearer sm_live_…" } -ContentType 'application/json' -Body '{"role":"viewer"}'
+```
+
+`organizationRole` et l'isolation stricte des organisations sont préservés. Codes dédiés : `FORBIDDEN_ROLE`, `KEY_NOT_FOUND`, `KEY_ID_UNAVAILABLE`, `INVALID_ADMIN_PAYLOAD`, `ADMIN_REQUIRES_REGISTRY`.
+
+### Stockage managé Supabase (0.15.0)
+
+Le même registre peut vivre sur un projet Supabase : définir `SETTLEMESH_SUPABASE_PROJECT_REF` et `SETTLEMESH_SUPABASE_SERVICE_KEY` (variables d'environnement utilisateur, jamais dans le dépôt), créer la table dans **SQL Editor** du projet :
+
+```sql
+create table if not exists public.settlemesh_registry(
+  id integer primary key,
+  schema_name text not null,
+  document jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.settlemesh_registry enable row level security;
+```
+
 Avec RLS activée sans policy, seules les requêtes authentifiées par le `service_role` peuvent lire et écrire. Migrer ensuite un registre local :
 
 ```powershell
@@ -271,7 +309,7 @@ Toutes les erreurs suivent ce format :
 - délai amont de 8 secondes et état `unavailable` distinct d’un résultat négatif ;
 - limite Peppol Directory de deux recherches par seconde appliquée au mieux par processus ou isolate ;
 - en-têtes `nosniff`, `no-referrer` et permissions sensibles désactivées ;
-- aucun compte utilisateur, session humaine, interface d'administration, journal d'audit persistant ni SLA dans cette version locale ; un rôle `owner`/`admin`/`viewer` est rattaché à la clé d'organisation et résolu côté serveur.
+- aucun compte utilisateur, session humaine, interface d'administration navigateur, journal d'audit persistant ni SLA dans cette version locale ; un rôle `owner`/`admin`/`viewer` est rattaché à la clé d'organisation, résolu côté serveur et plaqué par l'API d'administration.
 
 Avant tout déploiement Internet, il faut au minimum basculer le registre des clés sur un stockage chiffré managé (l'adaptateur plateforme managée prévu remplacera le fichier local sans changer le contrat), placer tout secret dans un gestionnaire de secrets, ajouter TLS géré, journal d'audit sans contenu sensible, observabilité, politique de rétention et revue de sécurité.
 

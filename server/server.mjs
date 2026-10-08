@@ -4,8 +4,9 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { authenticateApiKey, parseApiKeyConfiguration } from "./auth.mjs";
-import { createFileRegistry } from "./registry.mjs";
+import { createFileRegistry, writeRegistryFile } from "./registry.mjs";
 import { createSupabaseRegistry } from "./registry-supabase.mjs";
+import { handleAdminRequest } from "./admin.mjs";
 import { validateApiInvoice } from "./validation.mjs";
 import { IdentityInputError, verifyPeppol, verifyVies } from "../worker/identity.mjs";
 
@@ -110,6 +111,25 @@ export function createSettleMeshServer({
   const consumeIpRate = createRateLimiter(60_000);
   const consumeOrganizationRate = createRateLimiter(60_000);
   const consumePeppolRate = createRateLimiter(1_000);
+  const readOptionalJson = async (request) => {
+    if (!Number(request.headers["content-length"] || 0)) return {};
+    return readJson(request);
+  };
+
+  const registryAdminUnavailable = () => Object.assign(new Error("L'administration des clés exige un registre persistant (SETTLEMESH_REGISTRY_FILE ou SETTLEMESH_SUPABASE_*)."), { statusCode: 409, code: "ADMIN_REQUIRES_REGISTRY" });
+
+  const writeRegistryEntries = async (entries) => {
+    if (registry) {
+      writeRegistryFile(registryFile, entries);
+      return;
+    }
+    if (supabaseRegistry) {
+      await supabaseRegistry.write(entries);
+      return;
+    }
+    throw registryAdminUnavailable();
+  };
+
   return createServer(async (request, response) => {
     const requestId = randomUUID();
     const url = new URL(request.url || "/", "http://localhost");
@@ -160,6 +180,57 @@ export function createSettleMeshServer({
           const failure = apiError(requestId, error.code || "IDENTITY_CHECK_FAILED", status >= 500 ? "La vérification a échoué." : error.message, status);
           return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
         }
+      }
+
+      if (url.pathname.startsWith("/api/v1/admin/") || url.pathname === "/api/v1/admin") {
+        if (!registry && !supabaseRegistry) {
+          const failure = apiError(requestId, "ADMIN_REQUIRES_REGISTRY", registryAdminUnavailable().message, 409);
+          return jsonResponse(response, 409, failure.body, ipRateHeaders);
+        }
+        let authentication;
+        try {
+          authentication = await authenticateApiKey(request.headers.authorization, await credentialsSource());
+        } catch (registryError) {
+          const failure = apiError(requestId, registryError?.code || "SUPABASE_REGISTRY_UNAVAILABLE", registryError?.code === "SUPABASE_REGISTRY_UNAVAILABLE" ? "Le registre d'organisations est momentanément indisponible. Réessayez." : (registryError?.message || "Registre d'organisations indisponible."), registryError?.status || 503);
+          return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
+        }
+        if (!authentication.ok) {
+          const error = apiError(requestId, authentication.code, authentication.message, authentication.statusCode);
+          const challenge = authentication.statusCode === 401 ? { "WWW-Authenticate": 'Bearer realm="SettleMesh API"' } : {};
+          return jsonResponse(response, error.status, error.body, { ...ipRateHeaders, ...challenge });
+        }
+        const credential = authentication.credential;
+        const organizationRate = consumeOrganizationRate(credential.organizationId, credential.requestsPerMinute);
+        if (!organizationRate.allowed) {
+          const error = apiError(requestId, "RATE_LIMITED", "Quota de l'organisation atteint. Réessayez dans une minute.", 429);
+          return jsonResponse(response, 429, error.body, rateHeaders(organizationRate, credential.requestsPerMinute, "organization"));
+        }
+
+        const body = await readOptionalJson(request);
+        const segments = url.pathname.replace(/^\/api\/v1\/admin\/?/, "").split("/").filter(Boolean);
+        let outcome;
+        try {
+          outcome = await handleAdminRequest({
+            method: request.method,
+            segments,
+            body,
+            credential,
+            loadEntries: credentialsSource,
+            writeEntries: writeRegistryEntries,
+            requestId
+          });
+        } catch (error) {
+          if (error?.code === "SUPABASE_REGISTRY_UNAVAILABLE" || error?.code === "ADMIN_REQUIRES_REGISTRY" || error?.code === "INVALID_API_KEY_CONFIGURATION") {
+            const failure = apiError(requestId, error.code, error.message, error.status || 503);
+            return jsonResponse(response, failure.status, failure.body, ipRateHeaders);
+          }
+          throw error;
+        }
+        if (outcome.failure) {
+          const failure = apiError(requestId, outcome.failure.code, outcome.failure.message, outcome.failure.status);
+          return jsonResponse(response, failure.status, failure.body, { ...ipRateHeaders, ...rateHeaders(organizationRate, credential.requestsPerMinute, "organization") });
+        }
+        return jsonResponse(response, outcome.status, outcome.body, { ...ipRateHeaders, ...rateHeaders(organizationRate, credential.requestsPerMinute, "organization") });
       }
 
       if (url.pathname === "/api/v1/validate") {
