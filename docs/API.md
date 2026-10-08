@@ -58,6 +58,16 @@ alter table public.settlemesh_registry enable row level security;
 
 Avec RLS activée sans policy, seules les requêtes authentifiées par le `service_role` peuvent lire et écrire. La lecture est mise en cache 5 secondes et `GET /api/v1/health` expose `authentication.registry` et `authentication.supabase`. Migrer ensuite un registre local : `npm run registry:push -- chemin\vers\settlemesh-registry.json` (mise à priorité fichier local > Supabase > `SETTLEMESH_API_KEYS`). La révocation reste appliquée sans redémarrage.
 
+Le même serveur fournit ensuite :
+
+- l'application sur `http://127.0.0.1:4173/` ;
+- la santé de l'API sur `GET http://127.0.0.1:4173/api/v1/health` ;
+- la validation sur `POST http://127.0.0.1:4173/api/v1/validate`.
+- VIES sur `POST http://127.0.0.1:4173/api/v1/identity/vies` ;
+- Peppol Directory sur `POST http://127.0.0.1:4173/api/v1/identity/peppol`.
+
+Le port peut être changé avec la variable d'environnement `PORT`.
+
 ### Membres et sessions humaines (0.17.0, étape 2b-1)
 
 Les comptes humains exigent le stockage managé. Tables à créer dans **SQL Editor** :
@@ -106,38 +116,6 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:4173/api/v1/admin/keys' -H
 ```
 
 `organizationRole` et l'isolation stricte des organisations sont préservés. Codes dédiés : `FORBIDDEN_ROLE`, `KEY_NOT_FOUND`, `KEY_ID_UNAVAILABLE`, `INVALID_ADMIN_PAYLOAD`, `ADMIN_REQUIRES_REGISTRY`.
-
-### Stockage managé Supabase (0.15.0)
-
-Le même registre peut vivre sur un projet Supabase : définir `SETTLEMESH_SUPABASE_PROJECT_REF` et `SETTLEMESH_SUPABASE_SERVICE_KEY` (variables d'environnement utilisateur, jamais dans le dépôt), créer la table dans **SQL Editor** du projet :
-
-```sql
-create table if not exists public.settlemesh_registry(
-  id integer primary key,
-  schema_name text not null,
-  document jsonb not null,
-  updated_at timestamptz not null default now()
-);
-alter table public.settlemesh_registry enable row level security;
-```
-
-Avec RLS activée sans policy, seules les requêtes authentifiées par le `service_role` peuvent lire et écrire. Migrer ensuite un registre local :
-
-```powershell
-npm run registry:push -- chemin\vers\settlemesh-registry.json
-```
-
-Le serveur lit alors le registre via PostgREST en `fetch` natif (aucune dépendance nouvelle), avec priorité fichier local > Supabase > `SETTLEMESH_API_KEYS`. La lecture est mise en cache 5 secondes ; `GET /api/v1/health` expose `authentication.registry` et `authentication.supabase`. La révocation reste appliquée sans redémarrage.
-
-Le même serveur fournit ensuite :
-
-- l'application sur `http://127.0.0.1:4173/` ;
-- la santé de l'API sur `GET http://127.0.0.1:4173/api/v1/health` ;
-- la validation sur `POST http://127.0.0.1:4173/api/v1/validate`.
-- VIES sur `POST http://127.0.0.1:4173/api/v1/identity/vies` ;
-- Peppol Directory sur `POST http://127.0.0.1:4173/api/v1/identity/peppol`.
-
-Le port peut être changé avec la variable d'environnement `PORT`.
 
 ## Requête de validation
 

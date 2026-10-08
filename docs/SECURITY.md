@@ -73,6 +73,8 @@ L'historique persistant ne contient ni XML brut, ni acheteur, ni endpoint, ni r�
 | Dépendance ou artefact compromis | résultat de validation falsifié | versions figées et licences vendoriées | ajouter inventaire SBOM, checksums et processus de mise à jour signé |
 | Règle normative périmée | faux sentiment de conformité | versions visibles et indisponibilité traitée en avertissement | veille et cadence de mise à jour à instaurer |
 | Imitation du CheckLink par un tiers malveillant | collecte de factures de fournisseurs, fraude au faux fournisseur, atteinte à la marque | identité de l'acheteur lisible dans le lien et la page, parcours fournisseur sans compte, sans identifiant ni donnée bancaire | signature du profil dans le lien et page officielle de vérification à l'étude ; sensibiliser à l'origine du lien |
+| Énumération de membres et pas de verrouillage par compte sur `/auth/login` | cartographie de comptes via le temps de réponse, brute force ciblé | réponse générique `INVALID_CREDENTIALS` sans distinction existant/inexistant, limitation d'adresse IP en mémoire | pas de verrouillage progressif ni de retard aléatoire par compte ; ajouter les deux et une protection distribuée avant exposition |
+| Écriture concurrente du registre (read-modify-write) | deux mutations admin simultanées peuvent perdre une écriture (dernier écrivain gagne) | écriture atomique du document complet (fichier renommé, upsert Supabase), validation avant écriture | acceptable en pilote mono-instance ; ajouter un verrou/numéro de version ou des transactions conditionnelles avant production multi-instance |
 
 ## 5. Résultats OWASP WSTG
 

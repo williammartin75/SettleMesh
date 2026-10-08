@@ -107,14 +107,7 @@ export function createSettleMeshServer({
     : null);
   const credentialsSource = async () => {
     if (registry) return registry.credentials();
-    if (supabaseRegistry) {
-      try {
-        return await supabaseRegistry.credentials();
-      } catch (error) {
-        if (error?.code === "SUPABASE_REGISTRY_UNAVAILABLE") throw error;
-        throw error;
-      }
-    }
+    if (supabaseRegistry) return supabaseRegistry.credentials();
     return credentials;
   };
   const consumeIpRate = createRateLimiter(60_000);
@@ -205,7 +198,7 @@ export function createSettleMeshServer({
             const member = await membersStore.findMemberByEmail(payload?.email);
             const passwordOk = member && verifyPassword(payload?.password || "", member.password_hash);
             if (!passwordOk) {
-              const failure = apiError(requestId, "INVALID_CREDENTIALS", "Identifiants invalables.", 401);
+              const failure = apiError(requestId, "INVALID_CREDENTIALS", "Identifiants invalides.", 401);
               return jsonResponse(response, 401, failure.body, ipRateHeaders);
             }
             const session = await membersStore.createSession({ memberId: member.id, organizationId: member.organization_id, role: member.role });
@@ -232,8 +225,9 @@ export function createSettleMeshServer({
 
         if (url.pathname === "/api/v1/auth/logout" && request.method === "POST") {
           await membersStore.deleteSession(sessionCookie);
+          const cookieClearOptions = `Path=/; HttpOnly; SameSite=Lax; Max-Age=0${cookieSecure ? "; Secure" : ""}`;
           return jsonResponse(response, 200, { schema: "settlemesh-session", apiVersion: API_VERSION, requestId, terminated: true },
-            { ...ipRateHeaders, "Set-Cookie": `settlemesh_session=; ${cookieOptions}` });
+            { ...ipRateHeaders, "Set-Cookie": `settlemesh_session=; ${cookieClearOptions}` });
         }
 
         if (url.pathname === "/api/v1/auth/me" && request.method === "GET") {

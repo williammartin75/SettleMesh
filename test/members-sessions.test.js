@@ -127,6 +127,9 @@ test("login complet : cookie durci, /me, puis logout efface la session", async (
     const logout = await fetch(`${url}/logout`, { method: "POST", headers: { Cookie: `settlemesh_session=${cookie}` } });
     assert.equal(logout.status, 200);
     assert.ok((await logout.json()).terminated);
+    const clearCookie = logout.headers.get("set-cookie");
+    assert.match(clearCookie, /Max-Age=0/);
+    assert.ok(!clearCookie.includes("86400"), "le cookie d'effacement ne doit pas re-programmer 24 h");
     assert.deepEqual(sessionRows.has(cookie), false);
 
     const after = await fetch(`${url}/me`, { headers: { Cookie: `settlemesh_session=${cookie}` } });
