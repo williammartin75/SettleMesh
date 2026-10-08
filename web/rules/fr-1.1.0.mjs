@@ -1,7 +1,7 @@
-// Pack de règles nationales — France 1.0.0
+// Pack de règles nationales — France 1.1.0
 export default Object.freeze({
   country: "FR",
-  version: "1.0.0",
+  version: "1.1.0",
   effectiveFrom: "2026-09-01",
   effectiveUntil: null,
   source: {
@@ -22,6 +22,20 @@ export default Object.freeze({
       koMessage: "Numéro de TVA non conforme au format français attendu (FR suivi de 11 caractères).",
       fix: "Vérifiez le numéro de TVA intracommunautaire auprès de VIES et corrigez-le dans le champ concerné.",
       sourceLabel: "Numéro de TVA intracommunautaire — article 286 CGI / liste de la Commission européenne"
+    }),
+    Object.freeze({
+      id: "fr-siren-endpoint",
+      kind: "numeric-id",
+      severity: "error",
+      field: "BT-34/BT-49",
+      digits9Pattern: "^[0-9]{9}$",
+      digits14Pattern: "^[0-9]{14}$",
+      fields: ["supplierEndpoint", "buyerEndpoint"],
+      title: "Identifiant SIREN/SIRET du routage électronique",
+      okMessage: "Identifiant de routage au format SIREN/SIRET dont la clé de contrôle est valide.",
+      koMessage: "Identifiant de routage ressemblant à un SIREN/SIRET mais dont la clé de contrôle est invalide.",
+      fix: "Vérifiez le SIRET de l'entreprise auprès de l'INSEE et corrigez l'adresse électronique de routage (schéma 0009).",
+      sourceLabel: "SIREN/SIRET INSEE — clé de contrôle Luhn · code ISO 6523 0009"
     }),
     Object.freeze({
       id: "fr-reception-obligation",

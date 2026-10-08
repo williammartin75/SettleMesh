@@ -40,7 +40,7 @@ test("les packs respectent la fenêtre de date d'effet", () => {
   assert.ok(active.length >= 2);
   const packs = activePacks("FR", "2026-09-01");
   assert.equal(packs.length, 1);
-  assert.equal(packs[0].version, "1.0.0");
+  assert.equal(packs[0].version, "1.1.0");
   assert.deepEqual(activePacks("FR", "2026-08-31"), []);
 });
 
@@ -48,7 +48,7 @@ test("le moteur ignore prudemment les types de règle inconnus", () => {
   const invoice = parsedDemo(demoProfile());
   const checks = nationalChecks(invoice, demoProfile());
   const ids = checks.map((item) => item.id);
-  assert.ok(!ids.some((id) => !["fr-vat-format", "fr-reception-obligation"].includes(id)));
+  assert.ok(!ids.some((id) => !["fr-vat-format", "fr-siren-endpoint", "fr-reception-obligation"].includes(id)));
 });
 
 test("les identifiants hors préfixe FR laissent la règle sans avis", () => {
@@ -75,4 +75,45 @@ test("les contrôles nationaux sont déterministes", () => {
   const first = JSON.stringify(nationalChecks(invoice, demoProfile(), { date: "2026-10-08" }));
   const second = JSON.stringify(nationalChecks(invoice, demoProfile(), { date: "2026-10-08" }));
   assert.equal(first, second);
+});
+
+test("la clé SIREN valide passe la règle de routage", () => {
+  const invoice = parsedDemo(demoProfile());
+  invoice.supplierEndpoint = "552100554"; // SIREN de démonstration INSEE, Luhn valide
+  invoice.buyerEndpoint = "123456782";
+  const frSiren = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-siren-endpoint");
+  assert.equal(frSiren.status, "pass");
+});
+
+test("le préfixe de schéma EAS est retiré avant le contrôle SIREN", () => {
+  const invoice = parsedDemo(demoProfile());
+  invoice.supplierEndpoint = "0009:552100554";
+  invoice.buyerEndpoint = "0009:123456782";
+  invoice.buyerVat = "FR44123456789";
+  const frSiren = nationalChecks(invoice, demoProfile("FR44123456789"), { country: "FR" }).find((item) => item.id === "fr-siren-endpoint");
+  assert.equal(frSiren.status, "pass");
+});
+
+test("une pseudo-SIREN dont la clé Luhn échoue est signalée", () => {
+  const invoice = parsedDemo(demoProfile("FR44123456789"));
+  invoice.supplierEndpoint = "123456781"; // 9 chiffres, clé invalide
+  invoice.buyerEndpoint = "999999999"; // 9 chiffres, clé invalide
+  const frSiren = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-siren-endpoint");
+  assert.equal(frSiren.status, "error");
+});
+
+test("un SIRET à 14 chiffres est contrôlé via sa partie SIREN", () => {
+  const invoice = parsedDemo(demoProfile());
+  invoice.supplierEndpoint = "55210055400010"; // 14 chiffres, SIREN valide
+  invoice.buyerEndpoint = "12345678200012";
+  const frSiren = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-siren-endpoint");
+  assert.equal(frSiren.status, "pass");
+});
+
+test("une adresse électronique de routage n'est pas prise pour un SIRET", () => {
+  const invoice = parsedDemo(demoProfile());
+  invoice.supplierEndpoint = "contact@studio-horizon.fr";
+  invoice.buyerEndpoint = "123456782"; // seul cet identifiant est évalué
+  const frSiren = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-siren-endpoint");
+  assert.equal(frSiren.status, "pass");
 });

@@ -4,10 +4,12 @@
 // contient de logique exécutée à l'aveugle : seuls les types connus du moteur
 // sont évalués, les autres sont ignorés prudemment.
 
-import frPack from "./fr-1.0.0.mjs";
+import frPack from "./fr-1.1.0.mjs";
 
 const PACKS = [frPack];
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+const KNOWN_KINDS = ["id-format", "numeric-id", "notice"];
 
 const ISO_DATE_PATTERN = (value) => ISO_DATE.test(String(value || ""));
 const todayIsoDate = () => {
@@ -27,10 +29,13 @@ export function validatePack(pack) {
   if (!pack.source || typeof pack.source.label !== "string" || !pack.source.label.trim()) throw new Error("Pack national invalide : source obligatoire, une règle officielle doit rester identifiable.");
   for (const rule of pack.rules) {
     if (!rule || typeof rule.id !== "string" || !rule.id) throw new Error("Pack national invalide : règle sans identifiant.");
-    if (!["id-format", "notice"].includes(rule.kind)) continue; // les types inconnus sont ignorés par le moteur
     if (rule.kind === "id-format") {
       if (!Array.isArray(rule.fields) || !rule.fields.length) throw new Error(`Pack national invalide : la règle ${rule.id} ne cible aucun champ.`);
       if (!new RegExp(rule.pattern, "u")) throw new Error(`Pack national invalide : motif illégal dans ${rule.id}.`);
+    }
+    if (rule.kind === "numeric-id") {
+      if (!Array.isArray(rule.fields) || !rule.fields.length) throw new Error(`Pack national invalide : la règle ${rule.id} ne cible aucun champ.`);
+      if (!(new RegExp(rule.digits9Pattern, "u")) || !(new RegExp(rule.digits14Pattern, "u"))) throw new Error(`Pack national invalide : motif illégal dans ${rule.id}.`);
     }
   }
   return pack;
@@ -69,7 +74,66 @@ const patternOf = (() => {
   };
 })();
 
+// Luhn — clé de contrôle des identifiants INSEE (SIREN 9 chiffres, SIRET :
+// SIREN + 5 chiffres d'établissement, la validité de la partie SIREN est
+// indépendante du NIC).
+const luhnValid = (digits) => {
+  let sum = 0;
+  let double = false;
+  for (let position = digits.length - 1; position >= 0; position -= 1) {
+    let value = digits.charCodeAt(position) - 48;
+    if (value < 0 || value > 9) return false;
+    if (double) {
+      value *= 2;
+      if (value > 9) value -= 9;
+    }
+    sum += value;
+    double = !double;
+  }
+  return sum % 10 === 0;
+};
+
 const makeCheck = (id, status, title, message, fix, field) => ({ id, status, title, message, fix, field });
+
+const nationalRuleCheck = (rule, invoice) => {
+  if (rule.kind === "notice") return makeCheck(rule.id, "info", rule.title, rule.message, rule.fix || "", rule.field);
+  if (rule.kind === "id-format") {
+    let evaluated = 0;
+    let problem = false;
+    for (const name of rule.fields) {
+      const value = upperId(invoice?.[name]);
+      if (!value || !value.startsWith(rule.prefix)) continue;
+      evaluated += 1;
+      if (!patternOf(rule.pattern).test(value)) problem = true;
+    }
+    if (!evaluated) return null; // aucun identifiant du pays visé : la règle n'a rien à dire
+    return problem
+      ? makeCheck(rule.id, "error", rule.title, rule.koMessage, rule.fix, rule.field)
+      : makeCheck(rule.id, "pass", rule.title, rule.okMessage, "", rule.field);
+  }
+  if (rule.kind === "numeric-id") {
+    const digits9 = patternOf(rule.digits9Pattern);
+    const digits14 = patternOf(rule.digits14Pattern);
+    let evaluated = 0;
+    let problem = false;
+    for (const name of rule.fields) {
+      const raw = String(invoice?.[name] || "").trim();
+      const value = upperId(raw.replace(/^[0-9]{1,4}\s*:\s*/, "")); // retirer l'éventuel préfixe de schéma (ex. 0009:)
+      if (digits9.test(value)) {
+        evaluated += 1;
+        if (!luhnValid(value)) problem = true;
+      } else if (digits14.test(value)) {
+        evaluated += 1;
+        if (!luhnValid(value.slice(0, 9))) problem = true;
+      }
+    }
+    if (!evaluated) return null; // identifiant non numérique de 9 ou 14 chiffres : pas une donnée SIRET applicable
+    return problem
+      ? makeCheck(rule.id, "error", rule.title, rule.koMessage, rule.fix, rule.field)
+      : makeCheck(rule.id, "pass", rule.title, rule.okMessage, "", rule.field);
+  }
+  return null; // type inconnu : ignoré prudemment
+};
 
 export function nationalChecks(invoice, profile, { country, date = todayIsoDate() } = {}) {
   const normalizedCountry = String(country || profile?.country || "").trim().toUpperCase();
@@ -77,23 +141,8 @@ export function nationalChecks(invoice, profile, { country, date = todayIsoDate(
   for (const pack of listPacks()) {
     if (!packActive(pack, normalizedCountry, date)) continue;
     for (const rule of pack.rules) {
-      if (rule.kind === "notice") {
-        checks.push(makeCheck(rule.id, "info", rule.title, rule.message, rule.fix || "", rule.field));
-        continue;
-      }
-      if (rule.kind !== "id-format") continue; // type inconnu : ignoré prudemment
-      let evaluated = 0;
-      let problem = false;
-      for (const name of rule.fields) {
-        const value = upperId(invoice?.[name]);
-        if (!value || !value.startsWith(rule.prefix)) continue;
-        evaluated += 1;
-        if (!patternOf(rule.pattern).test(value)) problem = true;
-      }
-      if (!evaluated) continue; // aucun identifiant du pays visé : la règle n'a rien à dire
-      checks.push(problem
-        ? makeCheck(rule.id, "error", rule.title, rule.koMessage, rule.fix, rule.field)
-        : makeCheck(rule.id, "pass", rule.title, rule.okMessage, "", rule.field));
+      const produced = nationalRuleCheck(rule, invoice);
+      if (produced) checks.push(produced);
     }
   }
   return checks;
