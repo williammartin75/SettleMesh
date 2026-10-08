@@ -11,7 +11,7 @@
 | État | MVP durci : XSD local UBL 2.1/CII D16B, Schematron avec preuve d'exécution ; sécurité rôles/MFA et erreurs serveur ; Net strict avec invariants résiduels ; liens stables, registre utilisable et publication Worker par identité Sites + invitation ; compteurs minimisés à double accord et jeton signé. Pas une production certifiée. |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
-| Hébergement configuré | Worker Sites : actifs locaux, identité, registre, liens stables, compteurs et publication protégée. Base distante non configurée au début de la revue : accord de connexion demandé, pas supposé. Audience privée maintenue sur décision de l'utilisateur. Validation et administration des clés Node non déployées. |
+| Hébergement configuré | Worker 0.24.0 publié, version Sites 11, déploiement confirmé réussi ; accès privé inchangé. Santé et actifs vérifiés par accès de service, mais connexion visiteur non validée : erreur 500 à l'ouverture, puis vérification de sécurité sur la connexion plateforme. Base distante absente (révision d'environnement 0) : accord de connexion demandé, pas supposé. Validation et administration des clés Node non déployées. |
 | Langue actuelle | Français |
 | Architecture | HTML/CSS/JS sous `web/`, XSD libxml2-WASM en Worker navigateur, Schematron SaxonJS ; Worker Sites avec identité plateforme + membres Supabase invités ; Node local pour l'API complète. Aucun contenu de facture envoyé depuis le navigateur. |
 | Promesse courte | **Détecter les erreurs de facture avant envoi, puis simuler les flux évitables par compensation. Aucune garantie juridique.** |
@@ -252,7 +252,7 @@ Confidentialité actuelle : dans l'interface, le fichier est traité en mémoire
 
 Rôle : transformer un registre d'obligations acceptées en propositions de réduction des flux bruts.
 
-Entrées CSV obligatoires :
+Colonnes CSV (échéance facultative hors scénario de cut-off, autres champs obligatoires) :
 
 | Champ canonique | Alias acceptés principaux | Rôle |
 |---|---|---|
@@ -271,11 +271,13 @@ Contraintes actuelles :
 - CSV avec virgule ou point-virgule ;
 - cellules citées prises en charge ;
 - limite de 2 Mo ;
-- 500 obligations maximum persistées ;
-- montants arrondis à deux décimales ;
+- 500 obligations et 80 participants maximum ; dépassement refusé, sans troncature ni remplacement du registre courant ;
+- référence et devise explicites ; montants positifs, au plus un milliard, avec deux décimales maximum ; un montant trop précis est invalide, pas arrondi silencieusement ;
+- devises ISO à deux décimales uniquement ;
 - aucune compensation entre devises ;
-- seules les factures avec statut accepté, approuvé, validé ou dû sont éligibles ;
-- facture litigieuse ou déclarée cédée exclue ;
+- seules les factures explicitement acceptées ou approuvées sont éligibles ; `due` et `validated` ne suffisent pas ;
+- déclarations de litige et de cession explicitement fausses exigées ; une déclaration vraie, inconnue ou absente exclut la facture ;
+- toutes les occurrences d'une référence dupliquée pour le même créancier sont exclues ;
 - débiteur et créancier doivent être distincts ;
 - le calcul consomme d'abord les obligations les plus proches en échéance, puis par référence ;
 - avec un cut-off daté : les obligations postérieures à la date ou sans échéance exploitable sont mises de côté comme « différées » et comptées séparément dans le résumé, sans modifier la position nette du périmètre retenu ; la date doit être au format `AAAA-MM-JJ` et une date invalide est rejetée.
@@ -333,6 +335,7 @@ Rôle : rendre visible l'origine des validations et éviter l'effet « boîte no
 
 Sources actives :
 
+- XSD UBL 2.1 et CII D16B, embarqués avec origines et empreintes SHA-256 ;
 - EN 16931 version 1.3.16 pour UBL et CII ;
 - Peppol BIS Billing version 3.0.21 pour les UBL déclarant ce profil ;
 - précontrôle local PDF/A-3 des conteneurs Factur-X ;
@@ -374,13 +377,14 @@ Les valeurs comme `N/A`, `none`, `aucun` ou `sans` ne sont pas considérées com
 
 ### 5.3 Contrôles officiels
 
+- libxml2-WebAssembly contrôle d'abord la structure XSD UBL 2.1/CII D16B, localement ; une erreur bloque le document avant Schematron.
 - SaxonJS exécute dans le navigateur les artefacts compilés en SEF.
 - EN 16931 est exécuté pour UBL et CII.
 - Peppol est ajouté si le `CustomizationID` indique Peppol.
 - Pour Factur-X, SettleMesh vérifie localement `pdfaid:part`, le niveau PDF/A déclaré, les propriétés XMP Factur-X, la concordance du nom XML et les marqueurs `/AF` et `/AFRelationship` lisibles.
 - Ce précontrôle ne vérifie pas toutes les règles ISO 19005-3, notamment les polices, espaces colorimétriques, profils ICC, actions ou contraintes de rendu ; seul un validateur complet tel que veraPDF peut fournir ce niveau de contrôle.
 - Au maximum 24 erreurs d'un rapport normatif sont détaillées à l'écran ; les suivantes sont condensées.
-- Une indisponibilité du moteur officiel devient un avertissement explicite, pas une validation silencieuse.
+- Une indisponibilité du moteur officiel devient un avertissement explicite, pas une validation silencieuse ; un SVRL sans namespace attendu ni preuve de règle exécutée n'est jamais un succès.
 
 ### 5.4 Score et résultat
 
@@ -564,6 +568,8 @@ Depuis la version 0.16.0, les clés s'administrent par API sous `/api/v1/admin/*
 
 Depuis la version 0.17.0, des comptes humains existent : `POST /api/v1/auth/login`, `/logout` et `GET /me`, cookie `settlemesh_session` `HttpOnly`/`SameSite=Lax` de 24 h, mot de passe haché scrypt. Depuis la version 0.18.0, le MFA propriétaire (TOTP RFC 6238 en `server/totp.mjs`, sans dépendance) s'enrôle via `POST /auth/mfa/setup` (secret Base32 + URI otpauth, stocké inactif) puis `/auth/mfa/enable` (code vérifié avec fenêtre ±1 pas) ; au login, un compte MFA actif exige un code valide (`401 MFA_REQUIRED`) et un owner sans MFA se connecte avec `mfaEnrollmentRequired: true` ; `/auth/mfa/disable` exige le mot de passe ; `POST /auth/password` permet le changement de mot de passe authentifié par session. Le QR code reste à rendre côté interface. Toute indisponibilité du stockage reste `503 MEMBERS_UNAVAILABLE`, jamais maquillée en mauvais identifiants (invariant testé).
 
+Gardes 0.24.0 : CSRF sur toutes les mutations d'authentification hors login ; setup exige le mot de passe actuel et refuse un MFA déjà actif (409), sans changer le secret ; désactivation d'un MFA actif exige aussi son code valide. Les mauvais codes de login participent au verrouillage après cinq échecs. Le Worker emploie seulement l'identité Sites et une invitation préalable, pas ce mécanisme local mot de passe/TOTP.
+
 ## 8. Invariants à ne jamais casser
 
 ### 8.1 Invariants conformité
@@ -612,7 +618,7 @@ Depuis la version 0.17.0, des comptes humains existent : `POST /api/v1/auth/logi
 
 ### 9.1 Position actuelle
 
-SettleMesh v0.11 fournit un précontrôle technique incluant la structure hybride Factur-X/PDF/A-3, des packs de règles nationales versionnés, des vérifications VIES/Peppol ponctuelles, des métriques pilote agrégées locales, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne délivre pas de certification PDF/A, ne certifie pas une entreprise, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
+SettleMesh v0.24 fournit un précontrôle technique XSD/Schematron incluant la structure hybride Factur-X/PDF/A-3, des packs de règles nationales versionnés, des vérifications VIES/Peppol ponctuelles, des métriques locales et signaux serveur facultatifs à double accord, une API locale authentifiée d'intégration et une simulation de compensation. Le produit n'émet pas d'avis juridique, ne délivre pas de certification PDF/A, ne certifie pas une entreprise, ne garantit pas l'acceptation d'une facture et n'opère pas de règlement.
 
 ### 9.2 Revue sécurité et RGPD interne
 
@@ -773,7 +779,7 @@ Les listes suivantes décrivent la couverture conservée, ajustée pour les gard
 
 - client navigateur : routes same-origin uniquement, en-tête `X-SettleMesh-CSRF` présent sur les mutations de session et absent des lectures.
 
-`test/auth-mfa.test.js` — 8 tests :
+`test/auth-mfa.test.js` — 9 tests :
 
 - base32 conforme aux vecteurs RFC 4648 ;
 - TOTP conforme aux vecteurs RFC 6238 (T=59 → 287082, etc.) ;
@@ -782,7 +788,8 @@ Les listes suivantes décrivent la couverture conservée, ajustée pour les gard
 - login owner avec MFA : sans code → `401 MFA_REQUIRED`, avec le bon code → 200 ;
 - viewer sans MFA : login direct sans drapeau d'enrôlement ;
 - owner sans MFA actif : login toléré avec `mfaEnrollmentRequired: true` ;
-- setup → enable (mauvais code refusé) → disable (mot de passe requis) → changement de mot de passe qui invalide l'ancien.
+- setup → enable (mauvais code refusé) → disable (mot de passe et code requis si actif) → changement de mot de passe qui invalide l'ancien ; mutations protégées CSRF ;
+- cinq mauvais codes MFA déclenchent le verrouillage du login.
 
 `test/members-sessions.test.js` — 5 tests :
 
@@ -790,13 +797,14 @@ Les listes suivantes décrivent la couverture conservée, ajustée pour les gard
 - adaptateur : normalisation d'e-mail, création de membre et de session via PostgREST simulé ;
 - session périmée → `401 SESSION_EXPIRED` ; aucune session → `401 AUTH_REQUIRED` ;
 - login complet : mauvais mot de passe → `401 INVALID_CREDENTIALS` sans cookie, bon mot de passe → cookie `HttpOnly`/`SameSite=Lax`, `/me`, puis logout efface la session côté serveur ;
-- sans stockage membres → `409 MEMBERS_UNAVAILABLE`.
+- sans stockage membres → `503 MEMBERS_UNAVAILABLE`.
 
-`test/registry-admin.test.js` — 3 tests (ports éphémères, isolation par fichiers) :
+`test/registry-admin.test.js` — 4 tests (ports éphémères, isolation par fichiers) :
 
 - matrice de rôles appliquée : `viewer → 403 FORBIDDEN_ROLE`, listes admin/owner limitées à leur organisation ;
 - full HTTP : création (201, clé brute une fois), validation de la nouvelle clé (200), promotion interdite à un admin, changement de rôle owner, `KEY_NOT_FOUND`, révocation par DELETE puis `401 API_KEY_REVOKED`, changement de quota owner uniquement ;
-- `409 ADMIN_REQUIRES_REGISTRY` sans registre, et `KEY_NOT_FOUND` pour une clé d'une autre organisation.
+- `409 ADMIN_REQUIRES_REGISTRY` sans registre, et `KEY_NOT_FOUND` pour une clé d'une autre organisation ;
+- JSON admin malformé refusé sans arrêter le serveur, puis santé et administration toujours disponibles.
 
 `test/registry-supabase.test.js` — 6 tests (fetch simulé, aucun réseau dans la suite) :
 
@@ -1166,6 +1174,10 @@ Critères : structure XML fausse jamais prête ; MFA actif non réinitialisable 
 
 Validation du 8 octobre 2026 : tests et syntaxe passent ; build XSD/Schematron/runtime réalisé depuis les sources versionnées. Essais navigateur : facture de démonstration valide (100/100), invalide (correction requise), compensation démo (315 000 brut, 260 000 simulé, 55 000 résiduel), mobile et bureau ; console contrôlée. Le parcours publication → recherche → résolution → comparaison → mesure → mise à jour → retrait est testé automatiquement avec stockage simulé, pas prétendu validé sur la base hébergée réelle.
 
-Version 0.24.0 destinée à la publication privée sur le même Site ; la réussite du déploiement est confirmée par Sites, pas présumée par ce document source. Décision humaine : ne pas rendre public. La connexion de la base hébergée et la migration sont des opérations distinctes, non présumées autorisées. Une démo investisseur sans invitation reste donc volontairement impossible ; ni pilotes, ni revenus, ni traction n'ont été inventés.
+Publication privée 0.24.0 confirmée le 8 octobre 2026 : version Sites 11, déploiement `appgdep_6ac792e7f3688191bb922459ed76c7f2` réussi, construit depuis le commit `d8a7756f51184955c884b4ccc92143967aab249d`, également poussé sur GitHub. Les mises à jour documentaires ultérieures ne changent pas ce code déployé. Décision humaine : ne pas rendre public ; audience inchangée.
+
+Diagnostic hébergé : appel sans authentification = 401 ; accès de service limité au même Site = HTML, santé 0.24.0, JS et WASM 200 ; aucune identité visiteur fournie par cet accès (`/auth/me` = 401). La recherche du registre = 503, conforme à l'absence de configuration de base (révision 0). Journaux d'erreurs Worker vides sur la fenêtre examinée. L'ouverture privée dans le navigateur renvoie néanmoins 500 ; la route de connexion plateforme mène à une vérification de sécurité non terminée. Une cause liée à la couche d'accès est une hypothèse, pas un diagnostic confirmé. Aucun accès utilisateur de bout en bout ni fonctionnement réel du registre hébergé n'est annoncé comme validé ; ne pas affaiblir l'audience pour contourner ce blocage.
+
+La connexion de la base hébergée et la migration sont des opérations distinctes, non présumées autorisées. Une démo investisseur sans invitation reste donc volontairement impossible ; ni pilotes, ni revenus, ni traction n'ont été inventés. Les quatre groupes d'invariants restent inchangés ; cette clôture documentaire ne modifie aucun moteur, donnée, export ou frontière réglementaire. Acceptation : documentation fidèle aux résultats observés, suite/syntaxe/diff toujours propres.
 
 Fichiers ajoutés : `web/analysis-context.js`, `web/xsd.js`, `server/xsd.mjs`, `worker/membership.mjs`, `worker/telemetry.mjs`, `test/hardening.test.js`, `scripts/check.mjs`, `scripts/fetch-xsd-assets.mjs`, `migrations/001_pilot.sql`, `.github/workflows/verify.yml`, manifests/XSD sous `web/validation/xsd/`, moteur/licence sous `web/vendor/xmllint/` et `vendor/xmllint-wasm/`. 19 empreintes de schémas vérifiées ; téléchargement d'actualisation OASIS interrompu par délai réseau, sans écart d'empreinte ni besoin réseau à la compilation/validation.
