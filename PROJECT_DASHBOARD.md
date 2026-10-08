@@ -459,7 +459,7 @@ SettleMesh/
 │   ├── client/                  copie de web/ pour publication
 │   └── server/                  Worker et configuration des assets
 ├── scripts/
-│   ├── serve.mjs                lancement de l'application et de l'API locale, port 4173
+│   ├── serve.mjs                lancement de l'application et de l'API locale, port 4173 par défaut, surchargeable par la variable d'environnement PORT
 │   ├── create-api-key.mjs       génération locale d'une clé et de son hash de configuration
 │   ├── build-site-worker.mjs    construction déterministe de dist/
 │   └── build-validation-assets.mjs

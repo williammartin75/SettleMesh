@@ -45,7 +45,7 @@ npm run api:key -- atelier-nova
 npm run serve
 ```
 
-Puis ouvrir `http://127.0.0.1:4173`.
+Puis ouvrir `http://127.0.0.1:4173`. Le port par défaut est `4173` et peut être remplacé par la variable d'environnement `PORT` (par exemple `$env:PORT = "8081"`), le cas échéant ouvrir l'URL affichée par le serveur.
 
 La commande `api:key` affiche une clé une seule fois et l'objet de configuration contenant uniquement son hash SHA-256. Placer cet objet dans la variable `SETTLEMESH_API_KEYS` avant de lancer le serveur. Aucun secret ne doit être ajouté au dépôt ou au CheckLink.
 
