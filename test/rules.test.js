@@ -40,7 +40,7 @@ test("les packs respectent la fenêtre de date d'effet", () => {
   assert.ok(active.length >= 2);
   const packs = activePacks("FR", "2026-09-01");
   assert.equal(packs.length, 1);
-  assert.equal(packs[0].version, "1.1.0");
+  assert.equal(packs[0].version, "1.2.0");
   assert.deepEqual(activePacks("FR", "2026-08-31"), []);
 });
 
@@ -48,7 +48,7 @@ test("le moteur ignore prudemment les types de règle inconnus", () => {
   const invoice = parsedDemo(demoProfile());
   const checks = nationalChecks(invoice, demoProfile());
   const ids = checks.map((item) => item.id);
-  assert.ok(!ids.some((id) => !["fr-vat-format", "fr-siren-endpoint", "fr-reception-obligation"].includes(id)));
+  assert.ok(!ids.some((id) => !["fr-vat-format", "fr-siren-endpoint", "fr-facturx-profile", "fr-ctc-parcours", "fr-reception-obligation"].includes(id)));
 });
 
 test("les identifiants hors préfixe FR laissent la règle sans avis", () => {
@@ -57,6 +57,40 @@ test("les identifiants hors préfixe FR laissent la règle sans avis", () => {
   invoice.buyerVat = "DE123456789";
   const frVat = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-vat-format");
   assert.equal(frVat, undefined);
+});
+
+test("un profil Factur-X MINIMUM est signalé comme inadapté à la réception", () => {
+  const invoice = { supplierVat: "FR96552100554", containerPreflight: { conformanceLevel: "MINIMUM" } };
+  const frProfile = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-facturx-profile");
+  assert.equal(frProfile.status, "warning");
+});
+
+test("un profil Factur-X EN 16931 passe le contrôle de réception", () => {
+  const invoice = { supplierVat: "FR96552100554", containerPreflight: { conformanceLevel: "EN 16931" } };
+  const frProfile = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-facturx-profile");
+  assert.equal(frProfile.status, "pass");
+  assert.match(frProfile.message, /EN 16931/);
+});
+
+test("le parcours EXTENDED-CTC-FR produit une notice informative", () => {
+  const invoice = { supplierVat: "FR96552100554", containerPreflight: { conformanceLevel: "EXTENDED-CTC-FR" } };
+  const checks = nationalChecks(invoice, demoProfile(), { country: "FR" });
+  assert.equal(checks.find((item) => item.id === "fr-ctc-parcours")?.status, "info");
+  assert.equal(checks.find((item) => item.id === "fr-facturx-profile")?.status, "pass");
+});
+
+test("sans conteneur Factur-X lu, les règles de profil restent silencieuses", () => {
+  const invoice = parsedDemo(demoProfile());
+  const ids = nationalChecks(invoice, demoProfile()).map((item) => item.id);
+  assert.ok(!ids.includes("fr-facturx-profile"));
+  assert.ok(!ids.includes("fr-ctc-parcours"));
+});
+
+test("validatePack exige warnOn ou noticeOn pour une règle de profil Factur-X", () => {
+  const stripped = (rule) => listPacks().find((pack) => pack.country === "FR").rules.map((item) => (item.id === rule ? { ...item, warnOn: undefined, noticeOn: undefined } : item));
+  const packWithout = { ...frPack, rules: stripped("fr-facturx-profile") };
+  assert.throws(() => validatePack(packWithout), /warnOn ni noticeOn/);
+  assert.doesNotThrow(() => validatePack(frPack));
 });
 
 test("validatePack rejette les packs incomplets, dans une langue déterministe", () => {

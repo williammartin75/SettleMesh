@@ -4,12 +4,10 @@
 // contient de logique exécutée à l'aveugle : seuls les types connus du moteur
 // sont évalués, les autres sont ignorés prudemment.
 
-import frPack from "./fr-1.1.0.mjs";
+import frPack from "./fr-1.2.0.mjs";
 
 const PACKS = [frPack];
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-const KNOWN_KINDS = ["id-format", "numeric-id", "notice"];
 
 const ISO_DATE_PATTERN = (value) => ISO_DATE.test(String(value || ""));
 const todayIsoDate = () => {
@@ -36,6 +34,11 @@ export function validatePack(pack) {
     if (rule.kind === "numeric-id") {
       if (!Array.isArray(rule.fields) || !rule.fields.length) throw new Error(`Pack national invalide : la règle ${rule.id} ne cible aucun champ.`);
       if (!(new RegExp(rule.digits9Pattern, "u")) || !(new RegExp(rule.digits14Pattern, "u"))) throw new Error(`Pack national invalide : motif illégal dans ${rule.id}.`);
+    }
+    if (rule.kind === "facturx-profile") {
+      const hasWarnOn = Array.isArray(rule.warnOn) && rule.warnOn.length > 0;
+      const hasNoticeOn = Array.isArray(rule.noticeOn) && rule.noticeOn.length > 0;
+      if (!hasWarnOn && !hasNoticeOn) throw new Error(`Pack national invalide : la règle ${rule.id} ne déclare ni warnOn ni noticeOn.`);
     }
   }
   return pack;
@@ -131,6 +134,17 @@ const nationalRuleCheck = (rule, invoice) => {
     return problem
       ? makeCheck(rule.id, "error", rule.title, rule.koMessage, rule.fix, rule.field)
       : makeCheck(rule.id, "pass", rule.title, rule.okMessage, "", rule.field);
+  }
+  if (rule.kind === "facturx-profile") {
+    const level = String(invoice?.containerPreflight?.conformanceLevel || "").trim();
+    if (!level) return null; // pas un conteneur Factur-X lu : la règle n'a rien à dire
+    const upper = level.toUpperCase();
+    const matchedNotice = (rule.noticeOn || []).find((prefix) => upper.startsWith(String(prefix).toUpperCase()));
+    if (matchedNotice) return makeCheck(rule.id, "info", rule.title, rule.noticeMessage, rule.fix || "", rule.field);
+    if (!(rule.warnOn || []).length) return null; // règle purement informative non déclenchée : silencieuse
+    const matchedWarn = (rule.warnOn || []).find((prefix) => upper.startsWith(String(prefix).toUpperCase()));
+    if (matchedWarn) return makeCheck(rule.id, "warning", rule.title, rule.koMessage, rule.fix, rule.field);
+    return makeCheck(rule.id, "pass", rule.title, rule.okMessage.replace("{level}", level), "", rule.field);
   }
   return null; // type inconnu : ignoré prudemment
 };

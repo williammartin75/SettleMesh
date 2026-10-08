@@ -1,7 +1,7 @@
-// Pack de règles nationales — France 1.1.0
+// Pack de règles nationales — France 1.2.0
 export default Object.freeze({
   country: "FR",
-  version: "1.1.0",
+  version: "1.2.0",
   effectiveFrom: "2026-09-01",
   effectiveUntil: null,
   source: {
@@ -36,6 +36,31 @@ export default Object.freeze({
       koMessage: "Identifiant de routage ressemblant à un SIREN/SIRET mais dont la clé de contrôle est invalide.",
       fix: "Vérifiez le SIRET de l'entreprise auprès de l'INSEE et corrigez l'adresse électronique de routage (schéma 0009).",
       sourceLabel: "SIREN/SIRET INSEE — clé de contrôle Luhn · code ISO 6523 0009"
+    }),
+    Object.freeze({
+      id: "fr-facturx-profile",
+      kind: "facturx-profile",
+      severity: "warning",
+      field: "PDF/A-3",
+      warnOn: ["MINIMUM"],
+      fields: ["containerPreflight"],
+      title: "Profil Factur-X adapté à la réception",
+      okMessage: "Profil Factur-X « {level} » déclaré : lisible et exploitable pour un acheteur français.",
+      koMessage: "Profil Factur-X MINIMUM : seules les données d'entête et de pied sont présentes. Ce profil est conçu pour le e-reporting et ne contient pas de ligne de facture.",
+      fix: "Émettez la facture au minimum en profil Factur-X BASIC pour inclure les données de ligne, ou clarifiez le format attendu avec votre destinataire.",
+      sourceLabel: "FNFE-MPE — profils Factur-X (MINIMUM, BASIC WL, BASIC, EN 16931, EXTENDED)"
+    }),
+    Object.freeze({
+      id: "fr-ctc-parcours",
+      kind: "facturx-profile",
+      severity: "info",
+      field: "PDF/A-3",
+      noticeOn: ["EXTENDED-CTC"],
+      fields: ["containerPreflight"],
+      title: "Parcours France CTC déclaré",
+      noticeMessage: "Le niveau de profil Factur-X déclaré correspond au parcours français CTC (EXTENDED-CTC-FR). Ce contrôle est informatif ; l'exhaustivité du profil reste du ressort des artefacts officiels.",
+      fix: "",
+      sourceLabel: "FNFE-MPE / FeRD — Factur-X 1.09, profil de référence EXTENDED-CTC-FR"
     }),
     Object.freeze({
       id: "fr-reception-obligation",
