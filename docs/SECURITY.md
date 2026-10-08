@@ -48,6 +48,7 @@ Actifs à protéger : contenu des factures, identifiants fiscaux, noms de partie
 | Identifiant participant Peppol | Mémoire navigateur, Worker et Peppol Directory | Durée de la requête côté SettleMesh ; politique propre d’OpenPeppol côté source | Clic explicite « Rechercher dans Peppol » |
 | Hash de clé API | Variable de configuration serveur | Durée du processus | Non |
 | Hashes, rôles, quotas et révocations des clés API (registre persistant 0.14.0) | Fichier local `settlemesh-registry-1` désigné par `SETTLEMESH_REGISTRY_FILE` | Jusqu'à suppression du fichier ; relu à chaud, jamais de clé brute | Non |
+| Hashes, rôles, quotas et révocations des clés API (registre managé 0.15.0) | Table `public.settlemesh_registry` d'un projet Supabase, via PostgREST et clé `service_role` en variable d'environnement | Durée du projet ; relue avec cache de 5 s, RLS sans policy : service_role seul lecteur-écrivain, jamais de clé brute | Vers la source officielle Supabase au moment de la requête |
 
 L'historique persistant ne contient ni XML brut, ni acheteur, ni endpoint, ni référence de commande, ni détail des contrôles. Le dernier diagnostic complet n'est plus écrit dans `localStorage` à partir de la version `0.8.0`.
 

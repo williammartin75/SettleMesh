@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.14.0` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant local (hashes, rôles, révocation, quotas ; adaptateur plateforme managée à venir), métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.15.0` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0, Allemagne 1.0.0, Belgique 1.0.0), registre d'organisations persistant (fichier local ou base managée Supabase ; hashes, rôles, révocation et quotas, relecture à chaud), métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 102 tests au 8 octobre 2026 |
+| Tests automatisés | 108 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -153,7 +153,7 @@ Légende :
 | Netting | Scénario de cut-off daté | Opérationnel | Simulation locale uniquement ; les obligations postérieures au cut-off ou sans échéance exploitable sont différées et comptées séparément, jamais supprimées ni requalifiées |
 | Netting | Positions nettes et paiements résiduels | Opérationnel | Aucun ordre de paiement n'est émis |
 | Netting | Export des propositions et allocations | Opérationnel | Document de travail, pas un accord signé |
-| Identité | Registre d'organisations persistant (hashes, rôles, révocation, quotas) | Partiel | Fichier local relu sans redémarrage, clés uniquement hashées ; rôles résolus et renvoyés, aucun compte, session, membre ou interface d'administration humaine ; adaptateur plateforme managée (Supabase) à brancher |
+| Identité | Registre d'organisations persistant (hashes, rôles, révocation, quotas) | Partiel | Fichier local ou stockage managé Supabase (`SETTLEMESH_SUPABASE_*`), relus sans redémarrage, clés uniquement hashées ; rôles résolus et renvoyés, aucun compte, session humaine ni interface d'administration ; revue RGPD externe requise pour des données réelles |
 | Identité | Comptes, organisations multi-utilisateurs, rôles | Prévu | Nécessite stockage d'identité, sessions, invitations et droits persistants |
 | Réseau | Invitations et contreparties vérifiées | Prévu | Condition du vrai effet réseau |
 | Connecteurs | VIES | Opérationnel | Requête explicite sans stockage ; réponse ponctuelle, disponibilité amont et portée juridique limitées |
@@ -468,6 +468,7 @@ SettleMesh/
 │   ├── serve.mjs                lancement de l'application et de l'API locale, port 4173 par défaut, surchargeable par la variable d'environnement PORT
 │   ├── create-api-key.mjs       génération locale d'une clé et de son hash de configuration
 │   ├── registry-key.mjs         ajout d'une clé hashée au fichier de registre, avec rôle
+│   ├── registry-push.mjs        migration d'un registre local vers Supabase (upsert atomique)
 │   ├── build-site-worker.mjs    construction déterministe de dist/
 │   └── build-validation-assets.mjs
 │                                compilation/copie des moteurs normatifs
@@ -483,7 +484,8 @@ SettleMesh/
 │   └── fixtures/                documents de test
 ├── server/
 │   ├── auth.mjs                 génération, configuration et authentification des clés API
-│   ├── registry.mjs             registre d'organisations persistant (hashes, rôles, révocation)
+│   ├── registry.mjs             registre d'organisations (fichier local : hashes, rôles, révocation)
+│   ├── registry-supabase.mjs    adaptateur du registre vers PostgREST/Supabase (fetch natif)
 │   ├── server.mjs               HTTP, routage, limites et fichiers statiques
 │   └── validation.mjs           validation serveur EN 16931 / Peppol
 ├── docs/
@@ -532,7 +534,9 @@ Le Worker publié n’expose que les deux routes d’identité. Elles sont same-
 
 Limites : corps HTTP de validation de 2 Mo, XML de 1 Mo, protection générale de 120 requêtes par minute et par adresse IP, puis quota configurable par organisation de 60 par défaut. L'API accepte uniquement JSON et XML UBL/CII et refuse les déclarations `DOCTYPE`. Sans configuration de clé la validation reste fermée. Les routes d’identité utilisent un délai amont de 8 secondes ; Peppol est limité au mieux à deux recherches par seconde, conformément à sa documentation publique. Aucun endpoint n’ouvre CORS. Le serveur et le Worker appliquent CSP, anti-frame, `nosniff`, politiques referrer/permissions et isolation cross-origin. Le contrat de référence est `docs/openapi.yaml`.
 
-Depuis la version 0.14.0, les clés peuvent provenir de deux sources équivalentes : la variable `SETTLEMESH_API_KEYS` (configuration mémoire historique) ou le fichier de registre pointé par `SETTLEMESH_REGISTRY_FILE`. Ce fichier ne contient jamais de clé brute : organisation, `keyId`, hash SHA-256, rôle (`owner`/`admin`/`viewer`), quota et horodatage `revokedAt`. Une modification du fichier est reprise à chaud sans redémarrage ; une clé révoquée reçoit immédiatement `401 API_KEY_REVOKED`. Le rôle résolu par le serveur est renvoyé dans la réponse de validation sous `organizationRole`. Le registre reste local : aucun contenu de facture ni obligation ne transite par lui, et l'adaptateur plateforme managée (Supabase) viendra remplacer le stockage fichier sans changer le contrat.
+Depuis la version 0.15.0, le stockage managé est actif : en présence de `SETTLEMESH_SUPABASE_PROJECT_REF` et `SETTLEMESH_SUPABASE_SERVICE_KEY`, le registre est chargé depuis la table `public.settlemesh_registry` du projet (RLS activée, aucune policy : seul le service_role lit et écrit) via PostgREST, en `fetch` natif sans dépendance nouvelle. Priorité : fichier local > Supabase > variable d'environnement ; lecture en cache 5 s et badge `supabase` dans `/health`. Cycle vérifié sur le projet réel : pousser → valider (200, rôle renvoyé) → révoquer dans le fichier → re-pousser → revalider (401 `API_KEY_REVOKED`) **sans redémarrage du serveur**.
+
+Depuis la version 0.15.0, le stockage managé est actif : en présence de `SETTLEMESH_SUPABASE_PROJECT_REF` et `SETTLEMESH_SUPABASE_SERVICE_KEY` (variables d'environnement utilisateur, jamais dans le dépôt), le registre est chargé depuis la table `public.settlemesh_registry` du projet via PostgREST en `fetch` natif, sans dépendance nouvelle. Priorité : fichier local > Supabase > variable d'environnement. La lecture est mise en cache quelques secondes et les écritures passent par `npm run registry:push -- <registre.json>` (upsert atomique d'une ligne `id=1`, document complet). Le cycle vérifié le 8 octobre 2026 sur le projet réel : pousser → valider (200, rôle renvoyé) → révoquer dans le fichier → re-pousser → revalider (401 `API_KEY_REVOKED`) **sans redémarrage du serveur**. Balise `supabase` exposée dans `/api/v1/health` sous `authentication`.
 
 ## 8. Invariants à ne jamais casser
 
@@ -689,11 +693,18 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 102 tests
+### 12.2 Couverture actuelle des 108 tests
 
-`test/registry.test.js` — 9 tests :
+`test/registry-supabase.test.js` — 6 tests (fetch simulé, aucun réseau dans la suite) :
 
-- document de registre valide : entrées figées avec rôle, quota et révocation ;
+- chargement d'une ligne existante : clés, rôles et révocations exposés, `API_KEY_REVOKED` observable ;
+- cache de lecture avec fenêtre de sondage, forçage explicite ;
+- écriture = upsert atomique `id=1` avec revalidation du document ;
+- document invalide refusé avant toute requête réseau ;
+- clé service_role invalide → indisponibilité explicite (503) ;
+- aucune ligne → aucune clé (validation fermée).
+
+`test/registry.test.js` — 9 tests :- document de registre valide : entrées figées avec rôle, quota et révocation ;
 - refus d'un hash en clair, d'un rôle inconnu, d'une clé dupliquée et d'un doublon de hash ;
 - clé révoquée : `API_KEY_REVOKED` et non un refus générique ;
 - configuration d'environnement historique acceptée avec rôle owner par défaut ;
@@ -853,8 +864,8 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 ### P0 — rendre le pilote crédible
 
 - [x] Adopter SettleMesh comme marque mère, SettleMesh CheckLink comme module de conformité et SettleMesh Net comme module de compensation, avec migration rétrocompatible des données Eurule.
-- [ ] Ajouter comptes, sessions et organisations multi-utilisateurs avec membres et rôles ; l'API possède déjà une authentification technique par clé d'organisation. Décision du 8 octobre 2026 : registre d'organisations persisté en deux étapes (« option C échelonné ») — v0.14 : organisations, membres, rôles, révocation et quotas persistés localement (fichier `settlemesh-registry-1` relu à chaud, `npm run registry:key`), adaptateur Postgres managé communautaire (Supabase) restant à brancher sans changement de contrat ; v0.15+ : sessions humaines, cookies durcis et MFA propriétaire. Aucun contenu de facture ne transite vers ce registre. Si des données personnelles du périmètre de l'Europe sont traitées, les obligations RGPD (transferts internationaux, SCC, DPA) s'appliquent indépendamment du lieu d'hébergement et restent documentées par la revue externe.
-- [ ] Stocker profils et journaux côté serveur avec chiffrement, rétention et droits d'accès ; distinct du registre d'organisations (clés, rôles, révocation, quotas) qui est persisté localement depuis 0.14.0 — aucun profil ni journal de facturation ne transite par le registre.
+- [ ] Ajouter comptes, sessions et organisations multi-utilisateurs avec membres et rôles ; l'API possède déjà une authentification technique par clé d'organisation. Décision du 8 octobre 2026 : registre d'organisations persisté en deux étapes (« option C échelonné ») — v0.14-0.15 : organisations, rôles, révocation et quotas persistés (fichier `settlemesh-registry-1` relu à chaud, puis plateforme Supabase branchée via PostgREST en fetch natif, cycle réel pousser→valider→révoquer→401 vérifié) ; étape suivante : sessions humaines durcies, cookies durcis et MFA propriétaire. Aucun contenu de facture ne transite vers ce registre. Si des données personnelles du périmètre de l'Europe sont traitées, les obligations RGPD (transferts internationaux, SCC, DPA) s'appliquent indépendamment du lieu d'hébergement et restent documentées par la revue externe.
+- [ ] Stocker profils et journaux côté serveur avec chiffrement, rétention et droits d'accès ; distinct du registre d'organisations (clés, rôles, révocation, quotas) qui est persisté localement depuis 0.14.0 puis sur base managée Supabase depuis 0.15.0 — aucun profil ni journal de facturation ne transite par le registre ; l'onboarding veraPDF et le chiffrement au repos productif restent requis.
 - [x] Créer une API de validation versionnée avec contrat OpenAPI, validation serveur et absence de persistance ; le déploiement reste lié à la gestion persistante des secrets, quotas et audits.
 - [x] Protéger l'API pilote avec clés Bearer hashées, organisation déterminée côté serveur et rotation ; depuis 0.14.0, révocation et quotas persistés via le registre local, gestionnaire de secrets et pentest externes restent requis avant production.
 - [ ] Ajouter les contrôles nationaux du premier marché cible. Réalisé le 8 octobre 2026 : moteur de packs déclaratifs versionnés + packs France 1.3.0 (TVA, SIREN/SIRET, profil Factur-X, chemin de fer, notices), Allemagne 1.0.0 (TVA DE, Leitweg-ID BT-10 sur XRechnung) et Belgique 1.0.0 (TVA BE, communication structurée BT-83) ; la mise à jour des artefacts vers la révision EN 16931-1:2026, l'Italie, l'Espagne et la Pologne (KSeF) restent à prioriser.
@@ -942,6 +953,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-08 | Adopter un registre d'organisations persisté en deux étapes, sur plateforme Postgres managée | Rester local dans le MVP tout en préparant l'isolation multi-clients ; réutiliser la clé d'organisation hashée déjà testée | Étape 1 (v0.11) : organisations, membres, rôles et révocation persistés, quotas persistants, tests d'isolation inter-organisation ; étape 2 (v0.12) : sessions humaines durcies et MFA propriétaire ; aucune facture ni obligation ne transite vers ce registre ; aucune région imposée par le produit, mais DPA, transferts internationaux et avis RGPD externes restent requis avant données réelles |
 | 2026-10-08 | Introduire des packs de règles nationales déclaratifs et versionnés | Rendre les exigences par pays additives et modulaires sans dépendre d'un seul marché national : factures européennes traitables depuis n'importe où | Packs France 1.3.0 (TVA, SIREN/SIRET, profil Factur-X, chemin de fer, notices), Allemagne 1.0.0 (TVA, Leitweg-ID BT-10 déclenchée sur XRechnung, clé Mod 97-10) et Belgique 1.0.0 (TVA, communication structurée BT-83, clé Mod 97), source toujours citée, `validatePack` rejette un pack incomplet ; Italie, Espagne, Pologne (KSeF) et la mise à jour EN 16931-1:2026 restent à prioriser |
 | 2026-10-08 | Rendre le registre d'organisations persistant localement avant l'adaptateur plateforme managée | Fermer les portes production « révocation et quotas persistants » avec les moyens disponibles, tout en préparant la migration Supabase sans changer le contrat | Fichier `settlemesh-registry-1` : hashes SHA-256 uniquement, rôles owner/admin/viewer, revokedAt, quotas ; relecture à chaud (mtime), CLI `npm run registry:key` à écriture atomique, rôle renvoyé dans la réponse de validation ; comptes humains, sessions et MFA restent en étape 2, pentest et revue RGPD externes toujours requis |
+| 2026-10-08 | Brancher le registre sur la plateforme managée Supabase via PostgREST en fetch natif | Fermer la porte « adaptateur plateforme managée » sans dépendance nouvelle ni changement de contrat ; clé service_role limitée à un projet plutôt qu'un token compte-entier | Table `public.settlemesh_registry` durcie par RLS (aucune policy : seul le service_role lit/écrit), lecture en cache 5 s, `npm run registry:push` à upsert atomique, priorité fichier local > Supabase > mémoire, `.balise supabase` dans /health ; cycle réel pousser→valider→révoquer→401 vérifié sans redémarrage ; vérification RGPD externe et pentest toujours requis, RLS peut gagner par la suite des policies par organisation |
 
 ## 16. Questions ouvertes à trancher
 

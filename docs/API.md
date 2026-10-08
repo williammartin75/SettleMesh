@@ -42,6 +42,28 @@ npm run serve
 
 `registry:key` génère une clé brute affichée une seule fois et l'ajoute au fichier (hash SHA-256 uniquement) avec son rôle. Organisation par organisation, le fichier contient `organizationId`, `requestsPerMinute` (1 à 10 000) et la liste des clés : `keyId`, `keyHash`, `role`, `revokedAt` (`null` ou horodatage ISO). Le serveur relit ce fichier à chaud (horodatage de modification) : une clé ajoutée, tournée ou révoquée prend effet sans redémarrage. Une clé rétroactivement marquée `revokedAt` reçoit `401 API_KEY_REVOKED`. Le rôle résolu côté serveur est renvoyé dans chaque réponse de validation sous `organizationRole`. Le fichier ne doit jamais contenir de clé brute ni vivre dans le dépôt.
 
+### Stockage managé Supabase (0.15.0)
+
+Le même registre peut vivre sur un projet Supabase : définir `SETTLEMESH_SUPABASE_PROJECT_REF` et `SETTLEMESH_SUPABASE_SERVICE_KEY` (variables d'environnement utilisateur, jamais dans le dépôt), créer la table dans **SQL Editor** du projet :
+
+```sql
+create table if not exists public.settlemesh_registry(
+  id integer primary key,
+  schema_name text not null,
+  document jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.settlemesh_registry enable row level security;
+```
+
+Avec RLS activée sans policy, seules les requêtes authentifiées par le `service_role` peuvent lire et écrire. Migrer ensuite un registre local :
+
+```powershell
+npm run registry:push -- chemin\vers\settlemesh-registry.json
+```
+
+Le serveur lit alors le registre via PostgREST en `fetch` natif (aucune dépendance nouvelle), avec priorité fichier local > Supabase > `SETTLEMESH_API_KEYS`. La lecture est mise en cache 5 secondes ; `GET /api/v1/health` expose `authentication.registry` et `authentication.supabase`. La révocation reste appliquée sans redémarrage.
+
 Le même serveur fournit ensuite :
 
 - l'application sur `http://127.0.0.1:4173/` ;

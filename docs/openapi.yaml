@@ -148,14 +148,17 @@ components:
             peppol: { type: string }
         authentication:
           type: object
-          required: [validate, identity, configured, registry]
+          required: [validate, identity, configured, registry, supabase]
           properties:
             validate: { const: bearer-api-key }
             identity: { const: same-origin }
             configured: { type: boolean }
             registry:
               type: boolean
-              description: true quand les clés sont chargées depuis le fichier de registre (SETTLEMESH_REGISTRY_FILE), false quand c'est la variable SETTLEMESH_API_KEYS.
+              description: true quand les clés sont chargées depuis le fichier de registre (SETTLEMESH_REGISTRY_FILE), false sinon.
+            supabase:
+              type: boolean
+              description: true quand les clés sont chargées depuis la table public.settlemesh_registry d'un projet Supabase (SETTLEMESH_SUPABASE_*), lecture mise en cache 5 s.
         limits:
           type: object
           properties:

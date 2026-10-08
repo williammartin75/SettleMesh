@@ -5,6 +5,7 @@ import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { authenticateApiKey, parseApiKeyConfiguration } from "./auth.mjs";
 import { createFileRegistry } from "./registry.mjs";
+import { createSupabaseRegistry } from "./registry-supabase.mjs";
 import { validateApiInvoice } from "./validation.mjs";
 import { IdentityInputError, verifyPeppol, verifyVies } from "../worker/identity.mjs";
 
@@ -91,7 +92,21 @@ export function createSettleMeshServer({
   const normalizedRoot = resolve(root);
   const credentials = parseApiKeyConfiguration(JSON.stringify(apiKeys));
   const registry = registryFile ? createFileRegistry(registryFile) : null;
-  const credentialsSource = () => (registry ? registry.credentials() : credentials);
+  const supabaseRegistry = !registry && process.env.SETTLEMESH_SUPABASE_SERVICE_KEY && process.env.SETTLEMESH_SUPABASE_PROJECT_REF
+    ? createSupabaseRegistry({ projectRef: process.env.SETTLEMESH_SUPABASE_PROJECT_REF, serviceKey: process.env.SETTLEMESH_SUPABASE_SERVICE_KEY })
+    : null;
+  const credentialsSource = async () => {
+    if (registry) return registry.credentials();
+    if (supabaseRegistry) {
+      try {
+        return await supabaseRegistry.credentials();
+      } catch (error) {
+        if (error?.code === "SUPABASE_REGISTRY_UNAVAILABLE") throw error;
+        throw error;
+      }
+    }
+    return credentials;
+  };
   const consumeIpRate = createRateLimiter(60_000);
   const consumeOrganizationRate = createRateLimiter(60_000);
   const consumePeppolRate = createRateLimiter(1_000);
@@ -111,7 +126,7 @@ export function createSettleMeshServer({
         return jsonResponse(response, 200, {
           schema: "settlemesh-api-health", apiVersion: API_VERSION, status: "ok",
           validators: { en16931: "1.3.16", peppol: "3.0.21" },
-          authentication: { validate: "bearer-api-key", identity: "same-origin", configured: credentialsSource().length > 0, registry: Boolean(registry) },
+          authentication: { validate: "bearer-api-key", identity: "same-origin", configured: (await credentialsSource()).length > 0, registry: Boolean(registry), supabase: Boolean(supabaseRegistry) },
           identitySources: { vies: "live", peppolDirectory: "live", persistence: false },
           limits: { requestBytes: MAX_API_BODY_BYTES, xmlBytes: 1024 * 1024, ipRequestsPerMinute: rateLimit },
           persistence: false
@@ -157,7 +172,15 @@ export function createSettleMeshServer({
           return jsonResponse(response, error.status, error.body, ipRateHeaders);
         }
 
-        const authentication = authenticateApiKey(request.headers.authorization, credentialsSource());
+        let authentication;
+        try {
+          authentication = await authenticateApiKey(request.headers.authorization, await credentialsSource());
+        } catch (registryError) {
+          const unavailable = registryError?.code === "SUPABASE_REGISTRY_UNAVAILABLE" || /Indisponible|fichier de registre|registre Supabase/i.test(registryError?.message || "");
+          if (!unavailable) throw registryError;
+          const failure = apiError(requestId, "SUPABASE_REGISTRY_UNAVAILABLE", "Le registre d'organisations est momentanément indisponible. Réessayez.", 503);
+          return jsonResponse(response, 503, failure.body, ipRateHeaders);
+        }
         if (!authentication.ok) {
           const error = apiError(requestId, authentication.code, authentication.message, authentication.statusCode);
           const challenge = authentication.statusCode === 401 ? { "WWW-Authenticate": 'Bearer realm="SettleMesh API"' } : {};
