@@ -5,8 +5,15 @@ info:
   description: >-
     API pilote authentifiée de prévalidation UBL/CII. Elle n'est pas une certification
     juridique, ne conserve pas les factures et nécessite encore une infrastructure de
-    secrets, quotas et audit persistants avant une exposition Internet. Les routes
+    secrets, TLS et audit persistants avant une exposition Internet. Les routes
     d'identité VIES et Peppol ne persistent pas les identifiants ni leurs réponses.
+
+    Les clés proviennent de deux sources équivalentes : la variable SETTLEMESH_API_KEYS
+    (mémoire du processus) ou un fichier de registre pointé par SETTLEMESH_REGISTRY_FILE
+    (schéma settlemesh-registry-1 : hashes SHA-256 uniquement, rôles owner/admin/viewer,
+    révocation via revokedAt, quotas par organisation). Le fichier de registre est relu à
+    chaud : une révocation prend effet sans redémarrage et répond 401 API_KEY_REVOKED.
+    La réponse de validation porte le rôle résolu côté serveur sous organizationRole.
 servers:
   - url: http://127.0.0.1:4173/api/v1
     description: Serveur local
@@ -141,11 +148,14 @@ components:
             peppol: { type: string }
         authentication:
           type: object
-          required: [validate, identity, configured]
+          required: [validate, identity, configured, registry]
           properties:
             validate: { const: bearer-api-key }
             identity: { const: same-origin }
             configured: { type: boolean }
+            registry:
+              type: boolean
+              description: true quand les clés sont chargées depuis le fichier de registre (SETTLEMESH_REGISTRY_FILE), false quand c'est la variable SETTLEMESH_API_KEYS.
         limits:
           type: object
           properties:
@@ -235,7 +245,7 @@ components:
         instructions: { type: string }
     ValidationResponse:
       type: object
-      required: [schema, apiVersion, requestId, processedAt, organizationId, stored, result]
+      required: [schema, apiVersion, requestId, processedAt, organizationId, organizationRole, stored, result]
       properties:
         schema: { const: settlemesh-validation-response }
         apiVersion: { const: v1 }
@@ -244,6 +254,10 @@ components:
         organizationId:
           type: string
           description: Organisation déterminée par la clé API authentifiée.
+        organizationRole:
+          type: string
+          enum: [owner, admin, viewer]
+          description: Rôle résolu côté serveur pour la clé authentifiée. Depuis une configuration SETTLEMESH_API_KEYS, le rôle implicite est owner.
         stored: { const: false }
         result:
           $ref: '#/components/schemas/ValidationResult'
@@ -298,5 +312,15 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { type: string }
+            code:
+              type: string
+              description: >-
+                Codes observés : AUTH_NOT_CONFIGURED (503), AUTH_REQUIRED (401),
+                INVALID_API_KEY (401), API_KEY_REVOKED (401, clé avec revokedAt
+                dans le registre), RATE_LIMITED et UPSTREAM_RATE_LIMITED (429),
+                INVALID_JSON, INVALID_VAT_COUNTRY, INVALID_VAT_NUMBER,
+                INVALID_PEPPOL_ID, IDENTITY_CHECK_FAILED, METHOD_NOT_ALLOWED,
+                NOT_FOUND, BODY_TOO_LARGE, XML_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
+                XML_REQUIRED, INVALID_XML, UNSAFE_XML, INVALID_PROFILE,
+                VALIDATION_FAILED.
             message: { type: string }

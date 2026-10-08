@@ -4,7 +4,7 @@ L'API v1 permet à un ERP, un logiciel de facturation ou une Plateforme Agréée
 
 ## Statut
 
-La validation de factures est un endpoint pilote exécutable localement. Elle est versionnée, testée et protégée par des clés Bearer rattachées à une organisation. Elle n'est pas déployée avec le Site. Les clés et quotas étant encore configurés en mémoire, elle ne doit pas être exposée telle quelle sur Internet.
+La validation de factures est un endpoint pilote exécutable localement. Elle est versionnée, testée et protégée par des clés Bearer rattachées à une organisation. Elle n'est pas déployée avec le Site. Les clés peuvent être configurées de deux façons équivalentes — en mémoire via `SETTLEMESH_API_KEYS`, ou de façon persistante dans un fichier de registre `SETTLEMESH_REGISTRY_FILE` (hashes SHA-256, rôles, révocation à chaud, quotas) — ; elle ne doit pas être exposée sur Internet tant qu'un gestionnaire de secrets, TLS et une revue de sécurité externe ne sont pas en place.
 
 Les routes d’identité ne reçoivent jamais de facture et ne nécessitent pas de clé dans le parcours navigateur same-origin. Le Site les exécute dans un Worker sans base de données : l’identifiant est transmis à la source officielle, la réponse normalisée est renvoyée puis oubliée. L’accès au Site reste contrôlé par sa politique d’audience.
 
@@ -18,16 +18,29 @@ npm run api:key -- atelier-nova
 La commande affiche deux valeurs :
 
 1. la clé secrète `sm_live_…`, affichée une seule fois et à conserver côté client ;
-2. un objet JSON contenant `organizationId`, `keyId`, le hash SHA-256 et le quota de l'organisation.
+2. un objet JSON contenant `organizationId`, `keyId`, le hash SHA-256, le `role` et le quota de l'organisation.
 
 Configurer ensuite le serveur avec uniquement l'objet hashé :
 
 ```powershell
-$env:SETTLEMESH_API_KEYS = '[{"organizationId":"atelier-nova","keyId":"atelier-nova-20261007","keyHash":"<sha256-hexadecimal>","requestsPerMinute":60}]'
+$env:SETTLEMESH_API_KEYS = '[{"organizationId":"atelier-nova","keyId":"atelier-nova-20261007","keyHash":"<sha256-hexadecimal>","role":"owner","requestsPerMinute":60}]'
 npm run serve
 ```
 
-Plusieurs objets portant le même `organizationId` permettent une rotation progressive des clés. Les `keyId` et les hashes doivent rester uniques. Si la variable est absente ou vide, l'endpoint de validation reste fermé avec `503 AUTH_NOT_CONFIGURED`.
+Multi-clé : plusieurs objets portant le même `organizationId` permettent une rotation progressive des clés. Les `keyId` et les hashes doivent rester uniques. Depuis 0.14.0, l'objet de configuration porte aussi un `role` (`owner`, `admin` ou `viewer`). Si la variable est absente ou vide, l'endpoint de validation reste fermé avec `503 AUTH_NOT_CONFIGURED`.
+
+### Alternative persistante : le fichier de registre
+
+Au lieu de la variable d'environnement, la configuration peut vivre dans un fichier de registre versionné `settlemesh-registry-1` :
+
+```powershell
+npm run registry:key -- atelier-nova admin
+# puis, avant de lancer le serveur :
+$env:SETTLEMESH_REGISTRY_FILE = '.\settlemesh-registry.json'
+npm run serve
+```
+
+`registry:key` génère une clé brute affichée une seule fois et l'ajoute au fichier (hash SHA-256 uniquement) avec son rôle. Organisation par organisation, le fichier contient `organizationId`, `requestsPerMinute` (1 à 10 000) et la liste des clés : `keyId`, `keyHash`, `role`, `revokedAt` (`null` ou horodatage ISO). Le serveur relit ce fichier à chaud (horodatage de modification) : une clé ajoutée, tournée ou révoquée prend effet sans redémarrage. Une clé rétroactivement marquée `revokedAt` reçoit `401 API_KEY_REVOKED`. Le rôle résolu côté serveur est renvoyé dans chaque réponse de validation sous `organizationRole`. Le fichier ne doit jamais contenir de clé brute ni vivre dans le dépôt.
 
 Le même serveur fournit ensuite :
 
@@ -115,6 +128,7 @@ Invoke-RestMethod `
   "requestId": "2c51c119-26cf-4eec-a763-827703766faa",
   "processedAt": "2026-10-07T12:00:00.000Z",
   "organizationId": "atelier-nova",
+  "organizationRole": "owner",
   "stored": false,
   "result": {
     "id": "CHK-...",
@@ -135,7 +149,7 @@ Invoke-RestMethod `
 }
 ```
 
-`organizationId` provient exclusivement de la clé authentifiée, jamais du corps envoyé par le client. Le champ `result.invoice` contient uniquement les données structurées extraites. Le XML brut est retiré avant la réponse. `stored: false` indique que le serveur pilote ne conserve pas la requête ni son résultat.
+`organizationId` provient exclusivement de la clé authentifiée, jamais du corps envoyé par le client. `organizationRole` est le rôle résolu par le serveur pour cette clé : `owner`, `admin` ou `viewer` (depuis la configuration d'environnement, le rôle par défaut est `owner`). Le champ `result.invoice` contient uniquement les données structurées extraites. Le XML brut est retiré avant la réponse. `stored: false` indique que le serveur pilote ne conserve pas la requête ni son résultat.
 
 ## Résultats métier
 
@@ -203,6 +217,7 @@ Toutes les erreurs suivent ce format :
 | 400 | `INVALID_JSON` | Corps JSON non lisible |
 | 400 | `INVALID_VAT_COUNTRY`, `INVALID_VAT_NUMBER`, `INVALID_PEPPOL_ID` | Identifiant européen hors contrat |
 | 401 | `AUTH_REQUIRED`, `INVALID_API_KEY` | Clé absente ou invalide |
+| 401 | `API_KEY_REVOKED` | Clé marquée `revokedAt` dans le fichier de registre ; la révocation est relue à chaud, sans redémarrage |
 | 404 | `NOT_FOUND` | Route API inconnue |
 | 405 | `METHOD_NOT_ALLOWED` | Méthode HTTP non prise en charge |
 | 413 | `BODY_TOO_LARGE`, `XML_TOO_LARGE` | Limite de taille dépassée |
@@ -217,14 +232,15 @@ Toutes les erreurs suivent ce format :
 
 - corps HTTP : 2 Mo maximum ;
 - XML : 1 Mo maximum ;
-- 120 appels par minute et par adresse IP en mémoire, comme protection générale ;
+- 120 appels par minute et par adresse IP en mémoire du processus (réinitialisée à chaque redémarrage), comme protection générale ;
 - quota par organisation, 60 appels par minute par défaut et configurable entre 1 et 10 000 ;
 - toutes les clés d'une même organisation partagent son quota ;
 - XML UBL/CII uniquement ; le PDF Factur-X reste traité dans le navigateur ;
 - déclarations `DOCTYPE` refusées pour éviter toute résolution d'entité non fiable ;
 - aucune persistance ;
 - aucun contenu de facture dans les logs applicatifs ;
-- clé secrète jamais stockée dans la configuration : seul son hash SHA-256 est chargé ;
+- clé secrète jamais stockée dans la configuration : seul son hash SHA-256 est chargé, en mémoire (`SETTLEMESH_API_KEYS`) ou dans le fichier de registre (`SETTLEMESH_REGISTRY_FILE`) ;
+- avec le fichier de registre : rôles `owner`/`admin`/`viewer` résolus côté serveur et renvoyés dans la réponse, révocation (`revokedAt`) et quotas persistants relus à chaud ;
 - comparaison des hashes en temps constant et réponse générique en cas de clé invalide ;
 - organisation dérivée de la clé côté serveur, sans faire confiance au corps de requête ;
 - fermeture par défaut de la validation si aucune clé n'est configurée ;
@@ -233,9 +249,9 @@ Toutes les erreurs suivent ce format :
 - délai amont de 8 secondes et état `unavailable` distinct d’un résultat négatif ;
 - limite Peppol Directory de deux recherches par seconde appliquée au mieux par processus ou isolate ;
 - en-têtes `nosniff`, `no-referrer` et permissions sensibles désactivées ;
-- aucun compte utilisateur, rôle, session, journal d'audit persistant ni SLA dans cette version locale.
+- aucun compte utilisateur, session humaine, interface d'administration, journal d'audit persistant ni SLA dans cette version locale ; un rôle `owner`/`admin`/`viewer` est rattaché à la clé d'organisation et résolu côté serveur.
 
-Avant tout déploiement Internet, il faut au minimum placer les clés dans un gestionnaire de secrets, ajouter révocation et quotas persistants ou OAuth client credentials, TLS géré, journal d'audit sans contenu sensible, observabilité, politique de rétention et revue de sécurité.
+Avant tout déploiement Internet, il faut au minimum basculer le registre des clés sur un stockage chiffré managé (l'adaptateur plateforme managée prévu remplacera le fichier local sans changer le contrat), placer tout secret dans un gestionnaire de secrets, ajouter TLS géré, journal d'audit sans contenu sensible, observabilité, politique de rétention et revue de sécurité.
 
 ## Versionnement
 
