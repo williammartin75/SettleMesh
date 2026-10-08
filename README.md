@@ -21,7 +21,7 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - exports de rapports lisibles, JSON et CSV pour intégration dans un workflow ;
 - recherche et filtrage de l’historique local ;
 - export et import sécurisé du profil de réception ;
-- simulation de compensation bilatérale et triangulaire entre entreprises avec SettleMesh Net ;
+- simulation de compensation bilatérale et triangulaire entre entreprises avec SettleMesh Net, avec scenario « toutes les échéances », « cut-off aujourd'hui » ou cut-off daté personnalisé passé par le trésorier ;
 - import d’un registre de factures en CSV, exclusion des créances litigieuses ou cédées et séparation stricte par devise ;
 - calcul du volume compensable, des positions nettes et des paiements résiduels ;
 - export CSV des propositions de compensation et des factures mobilisées ;
@@ -76,7 +76,7 @@ La page **SettleMesh Net** contient un réseau de démonstration et accepte un r
 invoice_number;debtor;creditor;amount;currency;due_date;status;disputed;assigned
 ```
 
-Le moteur regroupe les obligations par devise, compense d’abord les dettes bilatérales, puis détecte les cycles triangulaires. Il conserve la position nette de chaque participant et exporte les propositions avec l’allocation aux factures d’origine.
+Le moteur regroupe les obligations par devise, compense d’abord les dettes bilatérales, puis détecte les cycles triangulaires. Il conserve la position nette de chaque participant et exporte les propositions avec l’allocation aux factures d’origine. La simulation peut être bornée par un cut-off : « toutes les échéances » (défaut), « cut-off aujourd'hui » ou une date personnalisée au format `AAAA-MM-JJ`. Les obligations postérieures au cut-off ou sans échéance exploitable sont différées et signalées par un compteur distinct, jamais supprimées, et la somme des positions nettes reste inchangée. L'export CSV mentionne le cut-off retenu dans la colonne `scenario_cutoff`.
 
 Cette fonctionnalité est une simulation d’aide à la décision. Elle ne déplace aucun fonds, n’initie aucun paiement et ne constate pas juridiquement l’extinction des créances. Toute mise en production nécessite notamment un accord entre les parties et une validation juridique, comptable et fiscale.
 

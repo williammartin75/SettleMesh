@@ -7,6 +7,14 @@ const partyKey = (value) => cleanText(value).normalize("NFD").replace(/[\u0300-\
 const normalizedHeader = (value) => partyKey(value).replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 const isTrue = (value) => ["1", "true", "yes", "oui", "o", "x"].includes(partyKey(value));
 
+function normalizeIsoDate(value) {
+  const raw = cleanText(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return "";
+  const [year, month, day] = raw.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? raw : "";
+}
+
 function parseAmount(value) {
   const raw = cleanText(value).replace(/\s/g, "");
   if (!raw) return NaN;
@@ -129,13 +137,19 @@ function leg(edge, from, to, amount, names) {
   return { from: names.get(from) || from, to: names.get(to) || to, amount, allocations: consumeEdge(edge, amount) };
 }
 
-export function simulateNetting(input) {
+export function simulateNetting(input, options = {}) {
+  const requestedCutoff = cleanText(options.cutoffDate);
+  const cutoffDate = normalizeIsoDate(requestedCutoff);
+  if (requestedCutoff && !cutoffDate) throw new Error("Date de cut-off invalide. Utilisez le format AAAA-MM-JJ.");
   const normalized = (Array.isArray(input) ? input : []).map((item, index) => normalizeObligation(item, index));
   const ignored = [];
+  const deferred = [];
   const eligible = [];
   normalized.forEach((item) => {
     const reason = eligibilityReason(item);
     if (reason) ignored.push({ ...item, reason });
+    else if (cutoffDate && !normalizeIsoDate(item.dueDate)) deferred.push({ ...item, reason: "Échéance absente ou invalide pour ce cut-off" });
+    else if (cutoffDate && item.dueDate > cutoffDate) deferred.push({ ...item, reason: "Échéance après le cut-off" });
     else eligible.push({ ...item, remainingAmount: item.amount });
   });
 
@@ -219,7 +233,9 @@ export function simulateNetting(input) {
   })).sort((a, b) => Math.abs(b.netPosition) - Math.abs(a.netPosition));
 
   return {
-    generatedAt: new Date().toISOString(), eligible, ignored, proposals, residuals, positions, metricsByCurrency,
+    generatedAt: new Date().toISOString(),
+    scenario: { cutoffDate: cutoffDate || null },
+    eligible, ignored, deferred, proposals, residuals, positions, metricsByCurrency,
     metrics: {
       grossVolume, nettedVolume, residualVolume,
       nettingRate: grossVolume ? Math.round((nettedVolume / grossVolume) * 1000) / 10 : 0,
@@ -247,12 +263,12 @@ const csvCell = (value) => {
 };
 
 export function exportNettingCsv(simulation) {
-  const header = ["proposal_id", "type", "currency", "gross_reduction", "from", "to", "amount", "invoices"];
+  const header = ["scenario_cutoff", "proposal_id", "type", "currency", "gross_reduction", "from", "to", "amount", "invoices"];
   const rows = [header.map(csvCell).join(";")];
   for (const proposal of simulation?.proposals || []) {
     for (const item of proposal.legs) {
       rows.push([
-        proposal.id, proposal.type, proposal.currency, proposal.grossReduction,
+        simulation?.scenario?.cutoffDate || "all", proposal.id, proposal.type, proposal.currency, proposal.grossReduction,
         item.from, item.to, item.amount, item.allocations.map((allocation) => `${allocation.invoiceNumber}:${allocation.amount}`).join(" | ")
       ].map(csvCell).join(";"));
     }

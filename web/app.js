@@ -39,6 +39,30 @@ const TITLES = {
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
 const clone = (value) => JSON.parse(JSON.stringify(value));
+const NETTING_SCENARIO_MODES = new Set(["all", "today", "custom"]);
+
+function normalizeNettingScenario(value) {
+  const mode = NETTING_SCENARIO_MODES.has(value?.mode) ? value.mode : "all";
+  const cutoffDate = /^\d{4}-\d{2}-\d{2}$/.test(String(value?.cutoffDate || "")) ? String(value.cutoffDate) : "";
+  return mode === "custom" && !cutoffDate ? { mode: "all", cutoffDate: "" } : { mode, cutoffDate };
+}
+
+function todayIsoDate() {
+  const date = new Date();
+  const part = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}`;
+}
+
+function scenarioCutoffDate(scenario) {
+  if (scenario.mode === "today") return todayIsoDate();
+  if (scenario.mode === "custom") return scenario.cutoffDate;
+  return "";
+}
+
+function formatIsoDate(value) {
+  const [year, month, day] = String(value).split("-").map(Number);
+  return new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, day)));
+}
 
 function loadState() {
   const persisted = readPersistedState(localStorage);
@@ -55,13 +79,14 @@ function loadState() {
       metrics: normalizeLocalMetrics(saved?.metrics, { history }),
       netting: {
         obligations: Array.isArray(saved?.netting?.obligations) ? saved.netting.obligations.slice(0, 500) : [],
-        source: saved?.netting?.source || ""
+        source: saved?.netting?.source || "",
+        scenario: normalizeNettingScenario(saved?.netting?.scenario)
       }
     };
     writePersistedState(localStorage, createPersistedState(loaded));
     return loaded;
   } catch {
-    return { profile: clone(DEFAULT_PROFILE), history: [], lastResult: null, metrics: normalizeLocalMetrics(null), netting: { obligations: [], source: "" } };
+    return { profile: clone(DEFAULT_PROFILE), history: [], lastResult: null, metrics: normalizeLocalMetrics(null), netting: { obligations: [], source: "", scenario: normalizeNettingScenario(null) } };
   }
 }
 
@@ -333,9 +358,23 @@ function renderNetting() {
     return;
   }
 
-  const simulation = simulateNetting(obligations);
+  const scenario = normalizeNettingScenario(state.netting.scenario);
+  state.netting.scenario = scenario;
+  const cutoffDate = scenarioCutoffDate(scenario);
+  const simulation = simulateNetting(obligations, { cutoffDate });
   currentNettingSimulation = simulation;
   results.hidden = false;
+  $$('[data-netting-scenario]').forEach((button) => {
+    const active = button.dataset.nettingScenario === scenario.mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  $("#netting-cutoff").value = scenario.mode === "custom" ? scenario.cutoffDate : "";
+  const scenarioLabel = cutoffDate ? `Cut-off au ${formatIsoDate(cutoffDate)}` : "Toutes les échéances";
+  $("#netting-scenario-name").textContent = scenarioLabel;
+  $("#netting-scenario-summary").textContent = cutoffDate
+    ? `${simulation.eligible.length} incluse(s) · ${simulation.deferred.length} hors période ou sans échéance · ${simulation.ignored.length} non éligible(s).`
+    : `${simulation.eligible.length} incluse(s) · ${simulation.ignored.length} non éligible(s). Activez un cut-off pour isoler une période.`;
   const currencySummary = (field) => simulation.metricsByCurrency.map((item) => formatMoney(item[field], item.currency)).join(" + ") || "0 €";
   $("#netting-gross").textContent = currencySummary("grossVolume");
   $("#netting-offset").textContent = currencySummary("nettedVolume");
@@ -346,8 +385,10 @@ function renderNetting() {
     : simulation.metricsByCurrency.map((item) => `${item.currency} ${item.nettingRate.toLocaleString("fr-FR")} %`).join(" · ");
   $("#netting-transfers").textContent = simulation.metrics.transfersAvoided;
   $("#netting-transfer-detail").textContent = `${simulation.metrics.transfersBefore} avant · ${simulation.metrics.transfersAfter} après`;
-  $("#netting-ignored").textContent = `${simulation.ignored.length} facture${simulation.ignored.length > 1 ? "s exclues" : " exclue"}`;
-  $("#netting-source p").textContent = `${state.netting.source || "Registre local"} · ${obligations.length} ligne${obligations.length > 1 ? "s" : ""} · calcul effectué dans ce navigateur.`;
+  const excludedCount = simulation.ignored.length;
+  const deferredCount = simulation.deferred.length;
+  $("#netting-ignored").textContent = `${excludedCount} exclue${excludedCount > 1 ? "s" : ""}${cutoffDate ? ` · ${deferredCount} hors période` : ""}`;
+  $("#netting-source p").textContent = `${state.netting.source || "Registre local"} · ${obligations.length} ligne${obligations.length > 1 ? "s" : ""} · ${scenarioLabel.toLocaleLowerCase("fr-FR")} · calcul local.`;
 
   $("#netting-proposals").innerHTML = simulation.proposals.length ? simulation.proposals.map((proposal) => {
     const label = proposal.type === "bilateral" ? "Bilatérale" : "Cycle à 3";
@@ -355,14 +396,14 @@ function renderNetting() {
     const legs = proposal.legs.map((item) => `<div class="proposal-leg"><span>${escapeHtml(item.from)}</span><span>→</span><span>${escapeHtml(item.to)}</span><strong>${escapeHtml(formatMoney(item.amount, proposal.currency))}</strong></div>`).join("");
     const invoices = [...new Set(proposal.legs.flatMap((item) => item.allocations.map((allocation) => allocation.invoiceNumber)))].join(", ");
     return `<article class="netting-proposal"><div class="proposal-top"><div><span class="proposal-type">${label}</span><h4>${escapeHtml(path)}</h4></div><div class="proposal-value"><strong>${escapeHtml(formatMoney(proposal.grossReduction, proposal.currency))}</strong><small>volume brut réduit</small></div></div><div class="proposal-legs">${legs}</div><p class="proposal-note">Factures mobilisées : ${escapeHtml(invoices)} · accord de toutes les parties requis.</p></article>`;
-  }).join("") : `<div class="empty-inline">Aucune boucle compensable détectée dans ce registre.</div>`;
+  }).join("") : `<div class="empty-inline">${simulation.eligible.length ? "Aucune boucle compensable détectée dans ce scénario." : "Aucune obligation éligible à cette date de cut-off."}</div>`;
 
-  $("#netting-positions").innerHTML = simulation.positions.map((position) => `<div class="netting-position"><div><strong>${escapeHtml(position.name)}</strong><small>${escapeHtml(position.currency)} · à recevoir ${escapeHtml(formatMoney(position.receivable, position.currency))} · à payer ${escapeHtml(formatMoney(position.payable, position.currency))}</small></div><span class="${position.netPosition >= 0 ? "positive" : "negative"}">${position.netPosition >= 0 ? "+" : "−"}${escapeHtml(formatMoney(Math.abs(position.netPosition), position.currency))}</span></div>`).join("");
+  $("#netting-positions").innerHTML = simulation.positions.length ? simulation.positions.map((position) => `<div class="netting-position"><div><strong>${escapeHtml(position.name)}</strong><small>${escapeHtml(position.currency)} · à recevoir ${escapeHtml(formatMoney(position.receivable, position.currency))} · à payer ${escapeHtml(formatMoney(position.payable, position.currency))}</small></div><span class="${position.netPosition >= 0 ? "positive" : "negative"}">${position.netPosition >= 0 ? "+" : "−"}${escapeHtml(formatMoney(Math.abs(position.netPosition), position.currency))}</span></div>`).join("") : `<div class="empty-inline">Aucune position dans le périmètre sélectionné.</div>`;
   $("#netting-residuals").innerHTML = simulation.residuals.length ? simulation.residuals.map((item) => `<div class="residual-row"><strong>${escapeHtml(item.debtor)}</strong><span>→</span><strong>${escapeHtml(item.creditor)}</strong><strong>${escapeHtml(formatMoney(item.remainingAmount, item.currency))}</strong></div>`).join("") : `<div class="empty-inline">Aucun paiement résiduel dans la simulation.</div>`;
 }
 
 function applyNettingObligations(obligations, source) {
-  state.netting = { obligations: obligations.slice(0, 500), source };
+  state.netting = { obligations: obligations.slice(0, 500), source, scenario: { mode: "all", cutoffDate: "" } };
   persist();
   renderNetting();
   if (currentView === "netting") $("#netting-results").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -655,10 +696,22 @@ function setupEvents() {
     applyNettingObligations(createNettingDemo(), "Réseau de démonstration");
     toast("Simulation prête", "Les compensations bilatérale et triangulaire ont été calculées.");
   });
+  $$('[data-netting-scenario]').forEach((button) => button.addEventListener("click", () => {
+    state.netting.scenario = { mode: button.dataset.nettingScenario, cutoffDate: "" };
+    persist();
+    renderNetting();
+  }));
+  $("#netting-cutoff").addEventListener("change", (event) => {
+    const cutoffDate = event.target.value;
+    state.netting.scenario = cutoffDate ? { mode: "custom", cutoffDate } : { mode: "all", cutoffDate: "" };
+    persist();
+    renderNetting();
+  });
   $("#netting-template").addEventListener("click", () => download("settlemesh-modele-compensation.csv", `\ufeff${nettingCsvTemplate()}`, "text/csv;charset=utf-8"));
   $("#netting-export").addEventListener("click", () => {
     if (!currentNettingSimulation?.proposals.length) return toast("Aucune proposition à exporter", "Chargez un registre contenant des dettes réciproques.");
-    download(`settlemesh-propositions-${new Date().toISOString().slice(0, 10)}.csv`, exportNettingCsv(currentNettingSimulation), "text/csv;charset=utf-8");
+    const suffix = currentNettingSimulation.scenario.cutoffDate || "toutes-echeances";
+    download(`settlemesh-propositions-${suffix}.csv`, exportNettingCsv(currentNettingSimulation), "text/csv;charset=utf-8");
   });
   window.addEventListener("hashchange", parseLocation);
 }

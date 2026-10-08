@@ -7,9 +7,9 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.10.0` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié et API de validation locale authentifiée ; pas encore un service multi-utilisateurs en production |
-| Dernière revue | 7 octobre 2026 |
+| Version du code | `0.10.1` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
+| Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
 | Langue actuelle | Français |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 56 tests au 7 octobre 2026 |
+| Tests automatisés | 58 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -148,6 +148,7 @@ Légende :
 | Netting | Cycles triangulaires | Opérationnel | Cycles de trois uniquement |
 | Netting | Isolation par devise | Opérationnel | Aucune conversion de change |
 | Netting | Exclusion litige / cession / statut | Opérationnel | Déclarations fournies par l'importeur, non vérifiées extérieurement |
+| Netting | Scénario de cut-off daté | Opérationnel | Simulation locale uniquement ; les obligations postérieures au cut-off ou sans échéance exploitable sont différées et comptées séparément, jamais supprimées ni requalifiées |
 | Netting | Positions nettes et paiements résiduels | Opérationnel | Aucun ordre de paiement n'est émis |
 | Netting | Export des propositions et allocations | Opérationnel | Document de travail, pas un accord signé |
 | Identité | Clés API d'organisation | Partiel | Hashes et quotas en mémoire ; aucun compte, session, membre ou rôle utilisateur |
@@ -272,7 +273,10 @@ Contraintes actuelles :
 - seules les factures avec statut accepté, approuvé, validé ou dû sont éligibles ;
 - facture litigieuse ou déclarée cédée exclue ;
 - débiteur et créancier doivent être distincts ;
-- le calcul consomme d'abord les obligations les plus proches en échéance, puis par référence.
+- le calcul consomme d'abord les obligations les plus proches en échéance, puis par référence ;
+- avec un cut-off daté : les obligations postérieures à la date ou sans échéance exploitable sont mises de côté comme « différées » et comptées séparément dans le résumé, sans modifier la position nette du périmètre retenu ; la date doit être au format `AAAA-MM-JJ` et une date invalide est rejetée.
+
+Scénarios disponibles depuis v0.10.1 : « toutes les échéances » (comportement historique), « cut-off aujourd'hui » (date locale du jour) et « cut-off personnalisé » (date choisie). Le scénario est persisté dans le stockage local et la colonne `scenario_cutoff` est ajoutée à l'export CSV des propositions, dont le nom de fichier mentionne la date.
 
 Algorithme v0.3 :
 
@@ -299,7 +303,8 @@ Sorties :
 - position nette par entreprise et par devise ;
 - paiements résiduels ;
 - nombre d'obligations exclues ;
-- export CSV des propositions.
+- nombre d'obligations différées par un cut-off et motif ;
+- export CSV des propositions avec la colonne `scenario_cutoff`.
 
 Définition importante : `grossReduction` représente la somme des branches neutralisées. Une compensation bilatérale de 25 000 € sur deux branches réduit 50 000 € de volume brut ; un cycle de 70 000 € sur trois branches réduit 210 000 €.
 
@@ -491,6 +496,7 @@ metrics      compteurs d’activation agrégés, sans contenu ni identifiant de 
 netting
   obligations  jusqu'à 500 obligations normalisées
   source       nom descriptif du registre chargé
+  scenario     mode de simulation du Net : toutes les échéances ou cut-off daté
 ```
 
 `lastResult`, le dernier diagnostic détaillé, reste uniquement en mémoire pendant la session et n'est jamais écrit dans `localStorage`.
@@ -673,7 +679,7 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 56 tests
+### 12.2 Couverture actuelle des 58 tests
 
 `test/core.test.js` — 13 tests :
 
@@ -691,13 +697,15 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - rejet d'un `DOCTYPE` avant parsing XML côté navigateur ;
 - résumé compatible avec un historique compact sans détail des contrôles.
 
-`test/netting.test.js` — 5 tests :
+`test/netting.test.js` — 7 tests :
 
 - compensation bilatérale et triangulaire ;
 - conservation des positions nettes ;
 - import CSV français et exclusion du litige ;
 - séparation des devises ;
-- neutralisation de l'injection de formule CSV.
+- cut-off daté appliqué sans modifier la somme des positions nettes du périmètre ;
+- écart prudent des échéances absentes ou invalides dans un scénario daté, rejet d'un format de cut-off invalide ;
+- neutralisation de l'injection de formule CSV et présence de `scenario_cutoff` dans l'export.
 
 `test/standards.test.js` — 6 tests :
 
@@ -769,6 +777,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - vérifier un participant Peppol présent et absent, sans interpréter la présence comme une garantie de livraison ;
 - charger le réseau de démonstration Net ;
 - vérifier 315 000 € brut, 260 000 € compensable, 55 000 € résiduel et 82,5 % ;
+- basculer le scénario Net entre « toutes les échéances », « cut-off aujourd'hui » et une date personnalisée, et vérifier que les obligations différées restent visibles et que la somme des positions nettes reste nulle ;
 - importer un CSV multidevise ;
 - vérifier qu'une facture litigieuse et une créance cédée sont exclues ;
 - tester la navigation clavier et la largeur mobile.
@@ -794,7 +803,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - [ ] Créer un registre serveur d'obligations avec droits par partie.
 - [ ] Importer depuis ERP/comptabilité et dédupliquer les factures.
 - [ ] Vérifier que chaque partie reconnaît la même obligation.
-- [ ] Ajouter périodes de netting, dates de cut-off et scénarios.
+- [ ] Ajouter périodes de netting, dates de cut-off et scénarios ; le cut-off daté de simulation est disponible localement depuis 0.10.1, sans workflow serveur ni scénarios multi-périodes persistés.
 - [ ] Étendre l'algorithme au netting multilatéral général, avec optimisation documentée.
 - [ ] Ajouter propositions, invitations, commentaires et acceptation multilatérale.
 - [ ] Générer un relevé d'accord immuable et export comptable.
@@ -862,6 +871,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-07 | Durcir le MVP après revue sécurité/RGPD interne | Réduire l'exposition locale et rendre les risques de production explicites sans promettre une conformité juridique | Historique compact sur 30 jours, diagnostic détaillé non persistant, CSP et anti-frame, modèle de menace documenté ; audit externe toujours requis |
 | 2026-10-07 | Activer VIES et Peppol Directory derrière un Worker minimal | Les APIs officielles ne sont pas appelables fiablement depuis une page statique à cause des politiques navigateur, mais la vérification doit fonctionner dans le produit publié | Identifiant minimal transmis au clic, aucun stockage, trois états distincts, quotas/délais explicites ; le contenu des factures reste local |
 | 2026-10-07 | Ajouter un précontrôle structurel PDF/A-3 dans le navigateur | Détecter les conteneurs Factur-X manifestement incohérents sans transmettre la facture ni prétendre reproduire un validateur ISO complet | XMP, nom du XML et association PDF deviennent des contrôles traçables ; veraPDF reste requis pour une validation exhaustive |
+| 2026-10-08 | Ajouter un scénario de cut-off daté à la simulation Net | Permettre au trésorier de borner la simulation à une date sans altérer les positions nettes ni présumer d'une extinction juridique anticipée | Les obligations hors cut-off sont différées et signalées par un compteur distinct, la date doit être `AAAA-MM-JJ`, l'export CSV trace le scénario via `scenario_cutoff` ; périodes récurrentes, workflow serveur et scénarios multi-parties restent en P1 |
 
 ## 16. Questions ouvertes à trancher
 

@@ -216,6 +216,14 @@
           </div>
 
           <div id="netting-results" hidden>
+            <article class="panel netting-scenario-panel">
+              <div class="scenario-copy"><span class="section-label">03 · Périmètre temporel</span><h3 id="netting-scenario-name">Toutes les échéances</h3><p id="netting-scenario-summary">Choisissez un cut-off pour isoler les obligations à inclure dans une période de compensation.</p></div>
+              <div class="scenario-controls" role="group" aria-label="Scénario de compensation">
+                <button class="scenario-option active" type="button" data-netting-scenario="all" aria-pressed="true">Tout le registre</button>
+                <button class="scenario-option" type="button" data-netting-scenario="today" aria-pressed="false">Échues aujourd’hui</button>
+                <label class="scenario-date"><span>Cut-off personnalisé</span><input id="netting-cutoff" type="date" aria-label="Date de cut-off personnalisée"></label>
+              </div>
+            </article>
             <div class="metric-grid netting-metric-grid">
               <article class="metric"><span>Volume brut éligible</span><strong id="netting-gross">—</strong><small id="netting-invoices">0 facture</small></article>
               <article class="metric accent"><span>Volume compensable</span><strong id="netting-offset">—</strong><small id="netting-rate">0 % du volume</small></article>

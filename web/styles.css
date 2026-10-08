@@ -349,7 +349,16 @@ button.batch-row:hover { background: #f8f9fb; }
 .netting-rules > div > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; background: var(--lime-soft); color: var(--lime-dark); font-size: 10px; font-weight: 850; }
 .netting-rules p, .netting-rules strong, .netting-rules small { display: block; margin: 0; }
 .netting-rules strong { font-size: 9px; }.netting-rules small { margin-top: 4px; color: var(--muted); font-size: 8px; line-height: 1.4; }
-.netting-metric-grid { margin-top: 18px; }
+.netting-scenario-panel { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; padding: 27px; margin-bottom: 18px; }
+.scenario-copy h3 { margin: 6px 0 0; font-size: 17px; letter-spacing: -.35px; }
+.scenario-copy p { margin: 7px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.scenario-controls { display: flex; flex-wrap: wrap; gap: 9px; justify-content: flex-end; }
+.scenario-option { padding: 10px 14px; border: 1px solid var(--line); border-radius: 11px; background: #f8f9fb; color: var(--muted); font-size: 9px; font-weight: 800; cursor: pointer; transition: .15s; }
+.scenario-option:hover { border-color: var(--blue); color: var(--blue); }
+.scenario-option.active { background: var(--ink); border-color: var(--ink); color: var(--lime); }
+.scenario-date { display: grid; gap: 5px; color: var(--muted-2); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
+.scenario-date input { width: 155px; font-size: 10px; }
+.netting-metric-grid { margin-top: 0; }
 .netting-results-grid { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(290px,.55fr); gap: 18px; }
 .netting-proposals { display: grid; gap: 11px; margin-top: 18px; }
 .netting-proposal { padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: #fafbfc; }
@@ -517,6 +526,9 @@ body.public-mode .checker-header::before { content: "settlemesh"; position: abso
   .identity-panel { padding: 20px 16px; }
   .identity-fields.split { grid-template-columns: 82px minmax(0,1fr); }
   .netting-input-actions { align-items: stretch; flex-direction: column; }
+  .netting-scenario-panel { flex-direction: column; align-items: stretch; }
+  .scenario-controls { justify-content: flex-start; }
+  .scenario-date input { width: 100%; }
   .netting-rules { grid-template-columns: 1fr; }
   .residual-row { grid-template-columns: 1fr auto; }
   .residual-row > :nth-child(2) { display: none; }

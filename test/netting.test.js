@@ -49,12 +49,45 @@ test("ne compense jamais deux devises différentes", () => {
   assert.equal(result.metrics.nettedVolume, 0);
 });
 
+test("applique un cut-off sans modifier les positions nettes du périmètre", () => {
+  const result = simulateNetting(createNettingDemo(), { cutoffDate: "2026-11-15" });
+  assert.equal(result.scenario.cutoffDate, "2026-11-15");
+  assert.equal(result.eligible.length, 3);
+  assert.equal(result.deferred.length, 2);
+  assert.equal(result.ignored.length, 1);
+  assert.equal(result.proposals.length, 1);
+  assert.equal(result.proposals[0].type, "triangular");
+  assert.equal(result.metrics.grossVolume, 250000);
+  assert.equal(result.metrics.nettedVolume, 210000);
+  assert.equal(result.metrics.residualVolume, 40000);
+  assert.equal(result.metrics.nettingRate, 84);
+  assert.equal(result.positions.reduce((sum, item) => sum + item.netPosition, 0), 0);
+});
+
+test("écarte prudemment les échéances absentes ou invalides d'un scénario daté", () => {
+  const obligations = [
+    { invoiceNumber: "F-1", debtor: "A", creditor: "B", amount: 100, currency: "EUR", dueDate: "", status: "accepted" },
+    { invoiceNumber: "F-2", debtor: "B", creditor: "A", amount: 80, currency: "EUR", dueDate: "2026-02-30", status: "accepted" }
+  ];
+  const allDates = simulateNetting(obligations);
+  const cutoff = simulateNetting(obligations, { cutoffDate: "2026-12-31" });
+  assert.equal(allDates.eligible.length, 2);
+  assert.equal(allDates.metrics.nettedVolume, 160);
+  assert.equal(cutoff.eligible.length, 0);
+  assert.equal(cutoff.deferred.length, 2);
+  assert.match(cutoff.deferred[0].reason, /Échéance/);
+  assert.throws(() => simulateNetting(obligations, { cutoffDate: "31/12/2026" }), /Date de cut-off invalide/);
+});
+
 test("exporte les propositions en CSV sans formule exécutable", () => {
   const result = simulateNetting([
     { invoiceNumber: "=DANGER", debtor: "A", creditor: "B", amount: 100, currency: "EUR", status: "accepted" },
     { invoiceNumber: "F-2", debtor: "B", creditor: "A", amount: 80, currency: "EUR", status: "accepted" }
   ]);
+  result.scenario.cutoffDate = "2026-12-31";
   const csv = exportNettingCsv(result);
   assert.match(csv, /bilateral/);
   assert.match(csv, /'=DANGER/);
+  assert.match(csv, /scenario_cutoff/);
+  assert.match(csv, /2026-12-31/);
 });
