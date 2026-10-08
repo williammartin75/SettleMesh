@@ -1,6 +1,6 @@
 # Sécurité, confidentialité et modèle de menace
 
-> Revue interne du 7 octobre 2026, périmètre SettleMesh `0.10.0`. Ce document décrit des mesures techniques et des risques ; il ne constitue ni un audit externe, ni un avis juridique, ni une déclaration de conformité au RGPD.
+> Revue interne du 7 octobre 2026, périmètre SettleMesh `0.10.0`. Ce document décrit des mesures techniques et des risques ; il ne constitue ni un audit externe, ni un avis juridique, ni une déclaration de conformité au RGPD. Ajout du 8 octobre 2026 : menace d'imitation du CheckLink par un tiers malveillant (hameçonnage ciblant les fournisseurs), issue de l'analyse stratégique du dossier `Strategic Study/`.
 
 ## 1. Périmètre et méthode
 
@@ -68,6 +68,7 @@ L'historique persistant ne contient ni XML brut, ni acheteur, ni endpoint, ni r�
 | Mauvaise compensation | erreur financière/juridique | devise isolée, exclusions, positions nettes testées, simulation uniquement | déclarations de litige/cession non vérifiées et absence d'accord signé |
 | Dépendance ou artefact compromis | résultat de validation falsifié | versions figées et licences vendoriées | ajouter inventaire SBOM, checksums et processus de mise à jour signé |
 | Règle normative périmée | faux sentiment de conformité | versions visibles et indisponibilité traitée en avertissement | veille et cadence de mise à jour à instaurer |
+| Imitation du CheckLink par un tiers malveillant | collecte de factures de fournisseurs, fraude au faux fournisseur, atteinte à la marque | identité de l'acheteur lisible dans le lien et la page, parcours fournisseur sans compte, sans identifiant ni donnée bancaire | signature du profil dans le lien et page officielle de vérification à l'étude ; sensibiliser à l'origine du lien |
 
 ## 5. Résultats OWASP WSTG
 
