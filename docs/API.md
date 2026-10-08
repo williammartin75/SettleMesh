@@ -114,7 +114,7 @@ Endpoints (session requise) :
 | `POST /auth/mfa/disable` `{password}` | désactive le MFA (mot de passe du compte requis) |
 | `POST /auth/password` `{currentPassword, newPassword}` | changement de mot de passe authentifié par session |
 
-Au login : un compte avec MFA actif exige un code valide (`401 MFA_REQUIRED` sans code) ; un owner sans MFA actif se connecte avec `mfaEnrollmentRequired: true` (rattrapage affiché, sans promesse de durée). Le QR code n'est pas rendu : saisie manuelle du secret dans l'application d'authentification. Toute indisponibilité du stockage reste `503 MEMBERS_UNAVAILABLE`, jamais maquillée en mauvais code.
+Au login : un compte avec MFA actif exige un code valide (`401 MFA_REQUIRED` sans code) ; un owner sans MFA actif se connecte avec `mfaEnrollmentRequired: true` (rattrapage affiché, sans promesse de durée). Depuis 0.21.0, **5 tentatives infructueuses par IP et e-mail sous 10 minutes déclenchent un verrouillage de 10 minutes** (`429 LOGIN_LOCKED`, réinitialisé au succès, réponse distincte du message identifiants) ; le QR code n'est pas rendu : saisie manuelle du secret dans l'application d'authentification. Toute indisponibilité du stockage reste `503 MEMBERS_UNAVAILABLE`, jamais maquillée en mauvais code.
 
 ### Registre public d'exigences de réception (0.19.0, étape 4 du pack)
 
