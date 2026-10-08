@@ -9,3 +9,6 @@ node_modules/
 .sites/
 settlemesh-site.zip
 eurule-site-*.tgz
+
+# Analyses stratégiques volontairement locales, hors du dépôt public
+Strategic Study/

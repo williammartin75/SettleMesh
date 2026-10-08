@@ -5,8 +5,10 @@
 // sont évalués, les autres sont ignorés prudemment.
 
 import frPack from "./fr-1.3.0.mjs";
+import dePack from "./de-1.0.0.mjs";
+import bePack from "./be-1.0.0.mjs";
 
-const PACKS = [frPack];
+const PACKS = [frPack, dePack, bePack];
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const ISO_DATE_PATTERN = (value) => ISO_DATE.test(String(value || ""));
@@ -42,6 +44,10 @@ export function validatePack(pack) {
     }
     if (rule.kind === "cii-sublines") {
       if (!Number.isFinite(rule.tolerance) || rule.tolerance < 0) throw new Error(`Pack national invalide : tolérance numérique attendue dans ${rule.id}.`);
+    }
+    if (rule.kind === "structured-comms" || rule.kind === "leitweg-id") {
+      if (!Array.isArray(rule.fields) || !rule.fields.length) throw new Error(`Pack national invalide : la règle ${rule.id} ne cible aucun champ.`);
+      if (rule.kind === "leitweg-id" && typeof rule.trigger !== "string") throw new Error(`Pack national invalide : déclencheur (trigger) attendu dans ${rule.id}.`);
     }
   }
   return pack;
@@ -98,6 +104,22 @@ const luhnValid = (digits) => {
   }
   return sum % 10 === 0;
 };
+
+// Mod 97-10 (ISO/IEC 7064) sur une séquence de chiffres
+const mod97Digits = (digits) => {
+  let remainder = 0;
+  for (const digit of digits) {
+    const value = digit.charCodeAt(0) - 48;
+    if (value < 0 || value > 9) return NaN;
+    remainder = (remainder * 10 + value) % 97;
+  }
+  return remainder;
+};
+
+// Conversion alphanumérique pour Mod 97-10 : A=10 … Z=35, autres caractères ignorés
+const toDigits97 = (text) => [...String(text || "").toUpperCase()]
+  .map((char) => (/[0-9]/.test(char) ? char : /[A-Z]/.test(char) ? String(char.charCodeAt(0) - 55) : ""))
+  .join("");
 
 const makeCheck = (id, status, title, message, fix, field) => ({ id, status, title, message, fix, field });
 
@@ -160,6 +182,34 @@ const nationalRuleCheck = (rule, invoice) => {
     return delta <= rule.tolerance
       ? makeCheck(rule.id, "pass", rule.title, rule.okMessage, "", rule.field)
       : makeCheck(rule.id, "error", rule.title, rule.koMessage.replace("{delta}", delta.toFixed(2)), rule.fix, rule.field);
+  }
+  if (rule.kind === "structured-comms") {
+    const digits = String(invoice?.[rule.fields[0]] || "").replace(/\D/g, "");
+    if (digits.length !== 12) return null; // pas une communication structurée : la règle n'a rien à dire
+    const expected = Number(digits.slice(0, 10)) % 97 || 97;
+    return Number(digits.slice(10)) === expected
+      ? makeCheck(rule.id, "pass", rule.title, rule.okMessage, "", rule.field)
+      : makeCheck(rule.id, "warning", rule.title, `${rule.koMessage} Clé attendue : ${expected}.`, rule.fix, rule.field);
+  }
+  if (rule.kind === "leitweg-id") {
+    if (rule.trigger && !String(invoice?.customizationId || "").toLowerCase().includes(rule.trigger.toLowerCase())) return null; // hors XRechnung : la règle n'a rien à dire
+    const raw = String(invoice?.[rule.fields[0]] || "").trim();
+    if (!raw) return makeCheck(rule.id, "error", rule.title, rule.koEmptyMessage, rule.fix, rule.field);
+    const parts = raw.split("-");
+    const grob = parts[0] || "";
+    const fine = parts.length === 3 ? parts[1] : "";
+    const check = parts.at(-1) || "";
+    const structureOk = parts.length >= 2 && parts.length <= 3
+      && /^\d{2,12}$/.test(grob)
+      && raw.length >= 5 && raw.length <= 46
+      && (parts.length === 2 || /^[A-Za-z0-9]{1,30}$/.test(fine))
+      && /^\d{2}$/.test(check);
+    if (!structureOk) return makeCheck(rule.id, "error", rule.title, rule.koMessage, rule.fix, rule.field);
+    const body = toDigits97(raw.slice(0, raw.length - 3));
+    const remainder = mod97Digits(body + check);
+    return remainder === 1
+      ? makeCheck(rule.id, "pass", rule.title, rule.okMessage, "", rule.field)
+      : makeCheck(rule.id, "error", rule.title, rule.orphanMessage, rule.fix, rule.field);
   }
   return null; // type inconnu : ignoré prudemment
 };

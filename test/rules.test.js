@@ -29,8 +29,10 @@ test("un numéro de TVA français bien formé passe la règle nationale sans blo
 
 test("aucune règle nationale française ne s'applique à un profil d'un autre pays", () => {
   const invoice = parsedDemo(demoProfile("FR44123456789", "DE"));
-  assert.equal(nationalChecks(invoice, demoProfile("FR44123456789", "DE")).length, 0);
-  assert.deepEqual(activePacks("DE"), []);
+  const dePackOnly = nationalChecks(invoice, demoProfile("FR44123456789", "DE")).map((item) => item.id);
+  assert.ok(dePackOnly.every((id) => id.startsWith("de-")), dePackOnly.join(", "));
+  assert.equal(activePacks("FR", "2026-08-31").length, 0);
+  assert.equal(activePacks("IT", "2026-10-08").length, 0);
 });
 
 test("les packs respectent la fenêtre de date d'effet", () => {
