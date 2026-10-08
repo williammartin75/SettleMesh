@@ -205,6 +205,28 @@ export function parseInvoiceXml(xmlText, Parser = globalThis.DOMParser) {
   const totals = node(settlement, "SpecifiedTradeSettlementHeaderMonetarySummation");
   const taxRegistration = (party) => [...(party?.getElementsByTagNameNS("*", "SpecifiedTaxRegistration") || [])]
     .map((registration) => field(registration, "ID")).find(Boolean) || "";
+  // Chemin de fer Factur-X 1.09 EXTENDED : sous-lignes rattachées via ParentLineID
+  const lineItems = [...root.getElementsByTagNameNS("*", "IncludedSupplyChainTradeLineItem")];
+  const lineEntries = lineItems.map((item) => {
+    const lineDocument = node(item, "AssociatedDocumentLineDocument");
+    const settlementLine = node(item, "SpecifiedLineTradeSettlement");
+    return {
+      id: field(lineDocument, "LineID"),
+      parentId: field(lineDocument, "ParentLineID"),
+      amount: number(field(settlementLine, "LineTotalAmount"))
+    };
+  });
+  const knownLineIds = new Set(lineEntries.map((entry) => entry.id).filter(Boolean));
+  const subLines = lineEntries.filter((entry) => entry.parentId);
+  const topLineSum = lineEntries
+    .filter((entry) => !entry.parentId && entry.amount !== null)
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const cheminDeFer = {
+    lineCount: lineEntries.length,
+    subLineCount: subLines.length,
+    unknownParents: subLines.filter((entry) => !knownLineIds.has(entry.parentId)).length,
+    topLineSum: Math.round(topLineSum * 100) / 100
+  };
   return {
     syntax: "CII", documentType: "Facture", invoiceNumber: directField(header, "ID"),
     customizationId: field(node(context, "GuidelineSpecifiedDocumentContextParameter"), "ID"),
@@ -220,6 +242,7 @@ export function parseInvoiceXml(xmlText, Parser = globalThis.DOMParser) {
     taxAmount: number(field(settlement, "TaxTotalAmount")), taxInclusive: number(directField(totals, "GrandTotalAmount")),
     payableAmount: number(directField(totals, "DuePayableAmount")),
     lineCount: root.getElementsByTagNameNS("*", "IncludedSupplyChainTradeLineItem").length,
+    cheminDeFer,
     sourceSize: textEncoder.encode(raw).length, raw
   };
 }

@@ -1,7 +1,7 @@
-// Pack de règles nationales — France 1.2.0
+// Pack de règles nationales — France 1.3.0
 export default Object.freeze({
   country: "FR",
-  version: "1.2.0",
+  version: "1.3.0",
   effectiveFrom: "2026-09-01",
   effectiveUntil: null,
   source: {
@@ -61,6 +61,21 @@ export default Object.freeze({
       noticeMessage: "Le niveau de profil Factur-X déclaré correspond au parcours français CTC (EXTENDED-CTC-FR). Ce contrôle est informatif ; l'exhaustivité du profil reste du ressort des artefacts officiels.",
       fix: "",
       sourceLabel: "FNFE-MPE / FeRD — Factur-X 1.09, profil de référence EXTENDED-CTC-FR"
+    }),
+    Object.freeze({
+      id: "fr-chemin-de-fer",
+      kind: "cii-sublines",
+      severity: "error",
+      field: "BG-25/BT-106",
+      tolerance: 0.02,
+      fields: ["cheminDeFer"],
+      title: "Chemin de fer Factur-X (sous-lignes EXTENDED)",
+      okMessage: "Sous-lignes (ParentLineID) du chemin de fer cohérentes avec le total des lignes BT-106.",
+      koMessage: "Écart de {delta} entre la somme des lignes de premier niveau et le total des lignes BT-106 : les sous-lignes du chemin de fer ne se rapprochent pas du total déclaré.",
+      orphanMessage: "Une sous-ligne du chemin de fer référence (ParentLineID) une ligne de facture inexistante.",
+      partialMessage: "Sous-lignes du chemin de fer détectées, mais le rapprochement avec le total BT-106 n'a pas pu être évalué (montants de ligne partiellement lisibles).",
+      fix: "Vérifiez que les lignes de premier niveau totalisent bien BT-106 et que chaque ParentLineID pointe vers une ligne réelle de la facture.",
+      sourceLabel: "Factur-X 1.09 / ZUGFeRD 2.5 EXTENDED — gestion des sous-lignes (ram:ParentLineID)"
     }),
     Object.freeze({
       id: "fr-reception-obligation",

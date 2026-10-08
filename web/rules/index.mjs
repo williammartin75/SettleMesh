@@ -4,7 +4,7 @@
 // contient de logique exécutée à l'aveugle : seuls les types connus du moteur
 // sont évalués, les autres sont ignorés prudemment.
 
-import frPack from "./fr-1.2.0.mjs";
+import frPack from "./fr-1.3.0.mjs";
 
 const PACKS = [frPack];
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -39,6 +39,9 @@ export function validatePack(pack) {
       const hasWarnOn = Array.isArray(rule.warnOn) && rule.warnOn.length > 0;
       const hasNoticeOn = Array.isArray(rule.noticeOn) && rule.noticeOn.length > 0;
       if (!hasWarnOn && !hasNoticeOn) throw new Error(`Pack national invalide : la règle ${rule.id} ne déclare ni warnOn ni noticeOn.`);
+    }
+    if (rule.kind === "cii-sublines") {
+      if (!Number.isFinite(rule.tolerance) || rule.tolerance < 0) throw new Error(`Pack national invalide : tolérance numérique attendue dans ${rule.id}.`);
     }
   }
   return pack;
@@ -145,6 +148,18 @@ const nationalRuleCheck = (rule, invoice) => {
     const matchedWarn = (rule.warnOn || []).find((prefix) => upper.startsWith(String(prefix).toUpperCase()));
     if (matchedWarn) return makeCheck(rule.id, "warning", rule.title, rule.koMessage, rule.fix, rule.field);
     return makeCheck(rule.id, "pass", rule.title, rule.okMessage.replace("{level}", level), "", rule.field);
+  }
+  if (rule.kind === "cii-sublines") {
+    const sub = invoice?.cheminDeFer;
+    if (!sub || !sub.subLineCount) return null; // chemin de fer absent : la règle n'a rien à dire
+    if (sub.unknownParents) return makeCheck(rule.id, "error", rule.title, rule.orphanMessage, rule.fix, rule.field);
+    if (invoice?.lineTotal == null || sub.topLineSum == null) {
+      return makeCheck(rule.id, "warning", rule.title, rule.partialMessage, rule.fix, rule.field);
+    }
+    const delta = Math.abs(sub.topLineSum - invoice.lineTotal);
+    return delta <= rule.tolerance
+      ? makeCheck(rule.id, "pass", rule.title, rule.okMessage, "", rule.field)
+      : makeCheck(rule.id, "error", rule.title, rule.koMessage.replace("{delta}", delta.toFixed(2)), rule.fix, rule.field);
   }
   return null; // type inconnu : ignoré prudemment
 };

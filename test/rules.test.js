@@ -40,7 +40,7 @@ test("les packs respectent la fenêtre de date d'effet", () => {
   assert.ok(active.length >= 2);
   const packs = activePacks("FR", "2026-09-01");
   assert.equal(packs.length, 1);
-  assert.equal(packs[0].version, "1.2.0");
+  assert.equal(packs[0].version, "1.3.0");
   assert.deepEqual(activePacks("FR", "2026-08-31"), []);
 });
 
@@ -91,6 +91,58 @@ test("validatePack exige warnOn ou noticeOn pour une règle de profil Factur-X",
   const packWithout = { ...frPack, rules: stripped("fr-facturx-profile") };
   assert.throws(() => validatePack(packWithout), /warnOn ni noticeOn/);
   assert.doesNotThrow(() => validatePack(frPack));
+});
+
+const ciiWithSubLines = ({ headerTotal = "1400.00", subParents = ["L1"], topTotal = null, orphan = false } = {}) => {
+  const parentRefs = subParents.map((id) => `<ram:ParentLineID>${id}</ram:ParentLineID>`).join("");
+  const lines = [
+    `<ram:IncludedSupplyChainTradeLineItem><ram:AssociatedDocumentLineDocument><ram:LineID>L1</ram:LineID></ram:AssociatedDocumentLineDocument><ram:SpecifiedTradeProduct><ram:Name>Kit composite</ram:Name></ram:SpecifiedTradeProduct><ram:SpecifiedLineTradeSettlement><ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>${topTotal ?? "1400.00"}</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement></ram:IncludedSupplyChainTradeLineItem>`,
+    `<ram:IncludedSupplyChainTradeLineItem><ram:AssociatedDocumentLineDocument><ram:LineID>S1</ram:LineID>${parentRefs}</ram:AssociatedDocumentLineDocument><ram:SpecifiedTradeProduct><ram:Name>Sous-ligne kit</ram:Name></ram:SpecifiedTradeProduct></ram:IncludedSupplyChainTradeLineItem>`
+  ];
+  const orphanParent = orphan ? `<ram:IncludedSupplyChainTradeLineItem><ram:AssociatedDocumentLineDocument><ram:LineID>S2</ram:LineID><ram:ParentLineID>L404</ram:ParentLineID></ram:AssociatedDocumentLineDocument></ram:IncludedSupplyChainTradeLineItem>` : "";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100" xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100" xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100" xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100">
+  <rsm:ExchangedDocumentContext><ram:GuidelineSpecifiedDocumentContextParameter><ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID></ram:GuidelineSpecifiedDocumentContextParameter></rsm:ExchangedDocumentContext>
+  <rsm:ExchangedDocument><ram:ID>CII-2026-1</ram:ID><ram:TypeCode>380</ram:TypeCode><ram:IssueDateTime><udt:DateTimeString format="102">20261008</udt:DateTimeString></ram:IssueDateTime></rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    ${lines.join("")}${orphanParent}
+    <ram:ApplicableHeaderTradeAgreement><ram:SellerTradeParty><ram:Name>Studio Horizon SAS</ram:Name><ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">FR96552100554</ram:ID></ram:SpecifiedTaxRegistration></ram:SellerTradeParty><ram:BuyerTradeParty><ram:Name>Atelier Nova SAS</ram:Name><ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">FR11123456782</ram:ID></ram:SpecifiedTaxRegistration></ram:BuyerTradeParty></ram:ApplicableHeaderTradeAgreement>
+    <ram:ApplicableHeaderTradeDelivery></ram:ApplicableHeaderTradeDelivery>
+    <ram:ApplicableHeaderTradeSettlement><ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode><ram:SpecifiedTradeSettlementHeaderMonetarySummation><ram:LineTotalAmount>${headerTotal}</ram:LineTotalAmount><ram:TaxBasisTotalAmount>${headerTotal}</ram:TaxBasisTotalAmount><ram:GrandTotalAmount>${headerTotal}</ram:GrandTotalAmount><ram:DuePayableAmount>${headerTotal}</ram:DuePayableAmount></ram:SpecifiedTradeSettlementHeaderMonetarySummation></ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>`;
+};
+
+test("un chemin de fer cohérent passe la règle nationale", () => {
+  const invoice = parseInvoiceXml(ciiWithSubLines(), DOMParser);
+  const chemin = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-chemin-de-fer");
+  assert.equal(chemin.status, "pass");
+});
+
+test("un écart entre lignes de premier niveau et BT-106 est signalé", () => {
+  const invoice = parseInvoiceXml(ciiWithSubLines({ topTotal: "1200.00" }), DOMParser);
+  const chemin = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-chemin-de-fer");
+  assert.equal(chemin.status, "error");
+  assert.match(chemin.message, /200\.00/);
+});
+
+test("une sous-ligne orpheline (ParentLineID inexistant) est bloquée", () => {
+  const invoice = parseInvoiceXml(ciiWithSubLines({ orphan: true }), DOMParser);
+  const chemin = nationalChecks(invoice, demoProfile(), { country: "FR" }).find((item) => item.id === "fr-chemin-de-fer");
+  assert.equal(chemin.status, "error");
+  assert.match(chemin.message, /inexistante/);
+});
+
+test("sans sous-lignes, la règle chemin de fer reste silencieuse", () => {
+  const plainUbl = parsedDemo(demoProfile());
+  assert.equal(nationalChecks(plainUbl, demoProfile()).some((item) => item.id === "fr-chemin-de-fer"), false);
+  const plainCii = parseInvoiceXml(ciiWithSubLines({ subParents: [] }), DOMParser);
+  assert.equal(nationalChecks(plainCii, demoProfile()).some((item) => item.id === "fr-chemin-de-fer"), false);
+});
+
+test("la règle chemin de fer exige une tolérance numérique", () => {
+  const broken = { ...frPack, rules: frPack.rules.map((item) => (item.id === "fr-chemin-de-fer" ? { ...item, tolerance: "large" } : item)) };
+  assert.throws(() => validatePack(broken), /tol[ée]rance/);
 });
 
 test("validatePack rejette les packs incomplets, dans une langue déterministe", () => {

@@ -7,8 +7,8 @@
 | Champ | Valeur actuelle |
 |---|---|
 | Produit | **SettleMesh**, avec le module d'acquisition **SettleMesh CheckLink** et l'upsell **SettleMesh Net** |
-| Version du code | `0.11.2` |
-| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.2.0 : TVA, SIREN/SIRET, profil Factur-X, notices réforme et CTC), métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
+| Version du code | `0.12.0` |
+| État | MVP fonctionnel durci, avec précontrôle local du conteneur Factur-X, moteur de packs de règles nationales (France 1.3.0 : TVA, SIREN/SIRET, profil Factur-X, chemin de fer des sous-lignes, notices réforme et CTC), métriques pilote locales, connecteurs VIES/Peppol sans persistance, Worker publié, API de validation locale authentifiée et scénario de cut-off local pour la compensation ; pas encore un service multi-utilisateurs en production |
 | Dernière revue | 8 octobre 2026 |
 | Dépôt | `williammartin75/SettleMesh`, branche `main` |
 | Hébergement configuré | Worker Sites servant les assets construits et les routes d’identité VIES/Peppol ; l’API Node de validation des factures n’est pas déployée |
@@ -18,7 +18,7 @@
 | Wedge d'acquisition | CheckLink gratuit ou peu coûteux partagé par un acheteur avec ses fournisseurs |
 | Upsell | SettleMesh Net : simulation et orchestration de compensations interentreprises |
 | Position réglementaire du MVP | Outil de contrôle et d'aide à la décision ; ne conserve pas de fonds, n'initie pas de paiement et ne constate pas seul l'extinction juridique d'une dette |
-| Tests automatisés | 76 tests au 8 octobre 2026 |
+| Tests automatisés | 81 tests au 8 octobre 2026 |
 
 ## 1. Vision et thèse produit
 
@@ -140,7 +140,7 @@ Légende :
 | Normes | Peppol BIS Billing 3.0.21 | Opérationnel | Déclenché sur les UBL déclarant un profil Peppol |
 | Normes | EN 16931 révisée | À surveiller | La révision EN 16931-1:2026 a été publiée ; les artefacts runtime restent 1.3.16, leur mise à jour est à planifier avec Contraticiel/Framework CTC du parcours France |
 | Règles acheteur | Entité, TVA, devise, références, endpoint | Opérationnel | Les règles doivent rester explicables et déterministes |
-| Règles nationales | Pack France 1.2.0 (format TVA, clé SIREN/SIRET, profil Factur-X, notices) | Partiel | Un seul pack ; détection du chemin de fer (sous-lignes EXTENDED) non implémentée ; autres pays à venir |
+| Règles nationales | Pack France 1.3.0 (TVA, SIREN/SIRET, profil Factur-X, chemin de fer, notices) | Partiel | Un seul pack ; chemin de fer limité au rapprochement BT-106 et à l'orphelinat des ParentLineID ; autres pays à venir |
 | Résultat | Score, statut et corrections | Opérationnel | Score produit, pas une certification officielle |
 | Lots | Jusqu'à 20 fichiers, 20 Mo chacun | Opérationnel | Traitement séquentiel dans le navigateur |
 | Rapports | TXT, JSON et CSV | Opérationnel | Pas de signature ni piste d'audit serveur |
@@ -336,7 +336,7 @@ Sources actives :
 - EN 16931 version 1.3.16 pour UBL et CII ;
 - Peppol BIS Billing version 3.0.21 pour les UBL déclarant ce profil ;
 - précontrôle local PDF/A-3 des conteneurs Factur-X ;
-- pack de règles nationales versionné selon le pays du profil : France 1.2.0 (format du TVA intracommunautaire, clé de contrôle SIREN/SIRET de l'identifiant de routage, profil Factur-X adapté à la réception, notice du parcours CTC, notice du calendrier de réception obligatoire) ;
+- pack de règles nationales versionné selon le pays du profil : France 1.3.0 (format du TVA intracommunautaire, clé de contrôle SIREN/SIRET de l'identifiant de routage, profil Factur-X adapté à la réception, chemin de fer des sous-lignes EXTENDED rapproché de BT-106, notice du parcours CTC, notice du calendrier de réception obligatoire) ;
 - VIES pour une validation ponctuelle d’un numéro TVA ;
 - Peppol Directory pour une recherche exacte de participant ;
 - règles configurées par le destinataire.
@@ -349,7 +349,7 @@ Les packs nationaux sont une donnée déclarative figée (pays, version, date d�
 
 ### 5.1 Extraction structurée
 
-Le parseur extrait actuellement : syntaxe, type de document, identifiants de profil, numéro, date, devise, référence acheteur, commande, noms et identifiants fiscaux fournisseur/acheteur, endpoints, totaux, montant payable et nombre de lignes.
+Le parseur extrait actuellement : syntaxe, type de document, identifiants de profil, numéro, date, devise, référence acheteur, commande, noms et identifiants fiscaux fournisseur/acheteur, endpoints, totaux, montant payable, nombre de lignes et, pour le CII, la structure du chemin de fer Factur-X (lignes, sous-lignes via `ram:ParentLineID`, somme des lignes de premier niveau, références de parent orphelines).
 
 ### 5.2 Contrôles produit déterministes
 
@@ -688,7 +688,7 @@ npm run serve
 
 Pour les changements d'interface, compléter par un contrôle navigateur de la page concernée, au minimum en bureau et largeur mobile, et vérifier l'absence d'erreur console.
 
-### 12.2 Couverture actuelle des 76 tests
+### 12.2 Couverture actuelle des 81 tests
 
 `test/core.test.js` — 13 tests :
 
@@ -716,7 +716,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - écart prudent des échéances absentes ou invalides dans un scénario daté, rejet d'un format de cut-off invalide ;
 - neutralisation de l'injection de formule CSV et présence de `scenario_cutoff` dans l'export.
 
-`test/rules.test.js` — 18 tests :
+`test/rules.test.js` — 23 tests :
 
 - pack France : échec prudemment bloquant sur un TVA FR malformé et notice de réforme ;
 - numéro de TVA français bien formé admis ;
@@ -733,6 +733,11 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - profil Factur-X EN 16931 admis pour la réception ;
 - parcours EXTENDED-CTC-FR annoncé par une notice informative ;
 - règles de profil silencieuses sans conteneur Factur-X lu ;
+- chemin de fer cohérent (sous-lignes rapprochées de BT-106) admis ;
+- écart entre lignes de premier niveau et BT-106 signalé avec son montant ;
+- sous-ligne orpheline (ParentLineID inexistant) bloquée ;
+- règle chemin de fer silencieuse sans sous-lignes, sur UBL et CII ;
+- tolérance numérique exigée pour la règle chemin de fer ;
 - `validatePack` exige warnOn ou noticeOn pour une règle de profil Factur-X ;
 - `validatePack` rejette les packs incomplets ou non sourcés ;
 - déterminisme des contrôles nationaux.
@@ -798,6 +803,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - copier puis ouvrir le CheckLink dans un nouvel onglet ;
 - tester les deux factures de démonstration ;
 - contrôler le PDF Factur-X de fixture et vérifier la règle nationale de profil : `pass` sur un profil EN 16931, `warning` sur un profil MINIMUM, notice sur EXTENDED-CTC-FR ;
+- contrôler un CII EXTENDED avec sous-lignes (chemin de fer) et vérifier le rapprochement BT-106 ainsi que le signalement d'un ParentLineID orphelin ;
 - vérifier que les diagnostics français affichent les contrôles nationaux : format TVA FR, clé SIREN/SIRET du routage et notice de réforme ;
 - importer un UBL, un CII et le PDF Factur-X de fixture ;
 - vérifier que le Factur-X affiche PDF/A-3B déclaré, le profil, le nom XML, la relation `/AF` et la limite « précontrôle » ;
@@ -823,7 +829,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 - [ ] Stocker profils et journaux côté serveur avec chiffrement, rétention et droits d'accès.
 - [x] Créer une API de validation versionnée avec contrat OpenAPI, validation serveur et absence de persistance ; le déploiement reste lié à la gestion persistante des secrets, quotas et audits.
 - [x] Protéger l'API pilote avec clés Bearer hashées, organisation déterminée côté serveur, rotation et quotas en mémoire ; secrets et quotas persistants restent requis avant production.
-- [ ] Ajouter les contrôles nationaux du premier marché cible. Premier livrable réalisé le 8 octobre 2026 : moteur de packs déclaratifs versionnés + pack France 1.1.0 (format TVA, clé SIREN/SIRET du routage, notice datée) ; le reste du périmètre français (CTC, BR-FR d'EXTENDED-CTC-FR, chemin de fer), la mise à jour des artefacts vers la révision EN 16931-1:2026 et les autres pays restent à prioriser.
+- [ ] Ajouter les contrôles nationaux du premier marché cible. Premier livrable réalisé le 8 octobre 2026 : moteur de packs déclaratifs versionnés + pack France 1.3.0 (format TVA, clé SIREN/SIRET du routage, profil Factur-X, chemin de fer des sous-lignes EXTENDED, notices datées) ; la mise à jour des artefacts vers la révision EN 16931-1:2026 et les autres pays restent à prioriser.
 - [ ] Vérifier exhaustivement la conformité PDF/A-3 de Factur-X ; le précontrôle structurel local XMP, profil et association XML est actif, mais une intégration veraPDF ou équivalente reste nécessaire pour clore ce point.
 - [x] Ajouter VIES et Peppol Directory avec états `vérifié`, `indisponible`, `non vérifié` distincts, requêtes explicites et aucune persistance côté SettleMesh.
 - [x] Instrumenter localement les métriques d'activation sans collecter le contenu ni les identifiants des factures ; toute télémétrie serveur reste soumise à consentement et analyse RGPD.
@@ -906,7 +912,7 @@ Pour les changements d'interface, compléter par un contrôle navigateur de la p
 | 2026-10-07 | Ajouter un précontrôle structurel PDF/A-3 dans le navigateur | Détecter les conteneurs Factur-X manifestement incohérents sans transmettre la facture ni prétendre reproduire un validateur ISO complet | XMP, nom du XML et association PDF deviennent des contrôles traçables ; veraPDF reste requis pour une validation exhaustive |
 | 2026-10-08 | Ajouter un scénario de cut-off daté à la simulation Net | Permettre au trésorier de borner la simulation à une date sans altérer les positions nettes ni présumer d'une extinction juridique anticipée | Les obligations hors cut-off sont différées et signalées par un compteur distinct, la date doit être `AAAA-MM-JJ`, l'export CSV trace le scénario via `scenario_cutoff` ; périodes récurrentes, workflow serveur et scénarios multi-parties restent en P1 |
 | 2026-10-08 | Adopter un registre d'organisations persisté en deux étapes, sur plateforme Postgres managée | Rester local dans le MVP tout en préparant l'isolation multi-clients ; réutiliser la clé d'organisation hashée déjà testée | Étape 1 (v0.11) : organisations, membres, rôles et révocation persistés, quotas persistants, tests d'isolation inter-organisation ; étape 2 (v0.12) : sessions humaines durcies et MFA propriétaire ; aucune facture ni obligation ne transite vers ce registre ; aucune région imposée par le produit, mais DPA, transferts internationaux et avis RGPD externes restent requis avant données réelles |
-| 2026-10-08 | Introduire des packs de règles nationales déclaratifs et versionnés | Rendre les exigences par pays additives et modulaires sans dépendre d'un seul marché national : factures européennes traitables depuis n'importe où | Pack France 1.2.0 livré (format TVA, clé Luhn SIREN/SIRET avec préfixe EAS retiré, profil Factur-X MINIMUM signalé, notice parcours CTC, notice réforme), source toujours citée, `validatePack` rejette un pack incomplet ; détection du chemin de fer (sous-lignes EXTENDED) et les autres pays restent hors périmètre de cette version |
+| 2026-10-08 | Introduire des packs de règles nationales déclaratifs et versionnés | Rendre les exigences par pays additives et modulaires sans dépendre d'un seul marché national : factures européennes traitables depuis n'importe où | Pack France 1.3.0 livré (format TVA, clé Luhn SIREN/SIRET avec préfixe EAS retiré, profil Factur-X MINIMUM signalé, chemin de fer des sous-lignes rapproché de BT-106 avec détection des ParentLineID orphelins, notices CTC et réforme), source toujours citée, `validatePack` rejette un pack incomplet ; les autres pays restent hors périmètre de cette version |
 
 ## 16. Questions ouvertes à trancher
 
