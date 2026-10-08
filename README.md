@@ -15,6 +15,7 @@ Le périmètre produit, l'état de chaque module, les invariants, les risques et
 - règles nationales déclaratives, versionnées et sourcées selon le pays du profil de réception — France 1.3.0 (format du numéro de TVA intracommunautaire, clé de contrôle SIREN/SIRET de l'identifiant de routage, contrôle du profil Factur-X reçu, chemin de fer des sous-lignes EXTENDED rapproché du total de lignes, notices réforme et parcours CTC), Allemagne 1.0.0 (format TVA DE et Leitweg-ID en BT-10 sur les XRechnung, clé Mod 97-10) et Belgique 1.0.0 (format TVA BE et communication structurée en BT-83, clé Mod 97) ;
 - vérification à la demande d’un numéro de TVA auprès de VIES, avec résultat horodaté `vérifié`, `non vérifié` ou `indisponible` ;
 - recherche publique et vérification officielle des exigences de réception d'une entreprise, sans compte, à partir de son registre publié (publication opt-in, réponses minimisées) ;
+- interface du registre dans l'app : recherche dans « Sources & règles », publication opt-in depuis « Mon CheckLink » après connexion membre (avec MFA si actif), et bouton « Vérifier ce CheckLink » dans l'aperçu fournisseur ;
 - recherche exacte d’un identifiant dans Peppol Directory, avec les mêmes états explicites et sans confusion avec une garantie de joignabilité ;
 - contrôles du destinataire, de la TVA, de l’adresse électronique, du numéro de commande et des totaux ;
 - diagnostic détaillé avec références EN 16931 `BT-*` ;

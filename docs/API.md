@@ -152,6 +152,8 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:4173/api/v1/requirements' 
 
 `PATCH /api/v1/requirements` (mise à jour ou changement de `published`), `DELETE /api/v1/requirements` (dépublication/suppression). La liste blanche stricte écarte tout champ inconnu : jamais de secret, donnée bancaire, contenu de facture ni obligation.
 
+Depuis 0.20.0, les mutations acceptent aussi une **session membre** (cookie `settlemesh_session` de rôle admin/owner) à condition d'un en-tête **`X-SettleMesh-CSRF: session`** — une en-tête personnalisée que ne peut pas forger un site tiers ; toute tentative sans elle répond `403 CSRF_REQUIRED`. L'interface navigateur l'utilise pour publier depuis « Mon CheckLink ».
+
 **Vérification officielle d'un CheckLink** (mitigation de la menace « CheckLink imité ») : `POST /api/v1/requirements/verify` reçoit le profil décodé du fragment (format inchangé) et répond sans compte :
 
 - `verified` : le profil correspond à la publication officielle de l'organisation ;

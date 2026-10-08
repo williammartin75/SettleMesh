@@ -158,6 +158,8 @@ export function createSettleMeshServer({
     throw registryAdminUnavailable();
   };
 
+  const sessionCookieOf = (request) => (request.headers.cookie || "").match(/(?:^|;\s*)settlemesh_session=([0-9a-f-]{36})/i)?.[1] || "";
+
   return createServer(async (request, response) => {
     const requestId = randomUUID();
     const url = new URL(request.url || "/", "http://localhost");
@@ -215,7 +217,7 @@ export function createSettleMeshServer({
           const failure = apiError(requestId, "MEMBERS_UNAVAILABLE", "Les sessions humaines exigent le stockage managé (SETTLEMESH_SUPABASE_*).", 409);
           return jsonResponse(response, 409, failure.body, ipRateHeaders);
         }
-        const sessionCookie = (request.headers.cookie || "").match(/(?:^|;\s*)settlemesh_session=([0-9a-f-]{36})/i)?.[1] || "";
+        const sessionCookie = sessionCookieOf(request);
         const cookieOptions = `Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${cookieSecure ? "; Secure" : ""}`;
 
         if (url.pathname === "/api/v1/auth/login" && request.method === "POST") {
@@ -417,13 +419,34 @@ export function createSettleMeshServer({
           const failure = apiError(requestId, "REQUIREMENTS_UNAVAILABLE", "Le registre d'exigences exige le stockage managé.", 503);
           return jsonResponse(response, 503, failure.body, ipRateHeaders);
         }
-        const authentication = await authenticateApiKey(request.headers.authorization, await credentialsSource());
-        if (!authentication.ok) {
-          const error = apiError(requestId, authentication.code, authentication.message, authentication.statusCode);
-          const challenge = authentication.statusCode === 401 ? { "WWW-Authenticate": 'Bearer realm="SettleMesh API"' } : {};
-          return jsonResponse(response, error.status, error.body, { ...ipRateHeaders, ...challenge });
+        let credential;
+        const sessionCookie = sessionCookieOf(request);
+        const authHeader = String(request.headers.authorization || "");
+        if (/^Bearer\s+/i.test(authHeader)) {
+          const authentication = await authenticateApiKey(authHeader, await credentialsSource());
+          if (!authentication.ok) {
+            const error = apiError(requestId, authentication.code, authentication.message, authentication.statusCode);
+            const challenge = authentication.statusCode === 401 ? { "WWW-Authenticate": 'Bearer realm="SettleMesh API"' } : {};
+            return jsonResponse(response, error.status, error.body, { ...ipRateHeaders, ...challenge });
+          }
+          credential = authentication.credential;
+        } else if (sessionCookie) {
+          // Session membre humaine : la mutation d'exigences exige l'en-tête CSRF
+          // personnalisé, impossible à forger depuis un autre site (SameSite=Lax).
+          if (String(request.headers["x-settlemesh-csrf"] || "") !== "session") {
+            const failure = apiError(requestId, "CSRF_REQUIRED", "L'en-tête X-SettleMesh-CSRF est requis pour une mutation via session.", 403);
+            return jsonResponse(response, 403, failure.body, ipRateHeaders);
+          }
+          try {
+            const session = await requireValidSession(membersStore, sessionCookie);
+            credential = { organizationId: session.organization_id, role: session.role, requestsPerMinute: 60 };
+          } catch (error) {
+            return membersErrorResponse(response, requestId, ipRateHeaders, error);
+          }
+        } else {
+          const failure = apiError(requestId, "AUTH_REQUIRED", "Ajoutez une clé API dans l'en-tête Authorization: Bearer, ou une session membre.", 401);
+          return jsonResponse(response, 401, failure.body, { ...ipRateHeaders, "WWW-Authenticate": 'Bearer realm="SettleMesh API"' });
         }
-        const credential = authentication.credential;
         if (!["owner", "admin"].includes(credential.role)) {
           const failure = apiError(requestId, "FORBIDDEN_ROLE", "La publication d'exigences exige le rôle admin ou owner.", 403);
           return jsonResponse(response, 403, failure.body, ipRateHeaders);
@@ -440,10 +463,6 @@ export function createSettleMeshServer({
             return jsonResponse(response, 200, { schema: "settlemesh-requirements", apiVersion: API_VERSION, requestId, deleted: true, organizationId: credential.organizationId }, ipRateHeaders);
           }
           const published = Boolean(payload?.published);
-          if (!published && request.method === "POST") {
-            // opt-in explicite : une création sans published:true reste un brouillon cherchable nulle part
-            payload.profile = payload?.profile || {};
-          }
           const record = await requirementsStore.upsert({
             organizationId: credential.organizationId,
             profile: payload?.profile || {},

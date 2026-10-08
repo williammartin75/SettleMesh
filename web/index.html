@@ -38,7 +38,7 @@
         <span class="trust-icon">◎</span>
         <div><strong>Analyse locale</strong><small>Les factures restent dans ce navigateur.</small></div>
       </div>
-      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.11</strong></div>
+      <div class="sidebar-footer"><span>MVP pilote</span><strong>v0.20</strong></div>
     </aside>
 
     <main class="main">
@@ -105,6 +105,8 @@
 
             <article class="panel preview-panel">
               <div class="panel-head"><div><span class="section-label">Ce que voit un fournisseur</span><h3 id="preview-company-name">Atelier Nova</h3></div><button class="icon-button" type="button" data-route="checker" aria-label="Ouvrir l’aperçu">↗</button></div>
+              <form id="checklink-verify-form" class="checklink-verify"><button class="button secondary" type="submit"><span>Vérifier ce CheckLink</span><small>vérification publique contre les exigences publiées</small></button></form>
+              <div class="identity-result idle" id="checklink-verify-result" aria-live="polite" hidden><span>—</span><div><strong>Résultat</strong><small>La vérification compare ce lien aux exigences publiées par l'entreprise.</small></div></div>
               <div class="recipient-card">
                 <div class="recipient-top"><span class="large-avatar" id="preview-avatar">AN</span><div><strong id="preview-legal-name">Atelier Nova SAS</strong><small id="preview-vat">FR40123456789</small></div><span class="country-badge" id="preview-country">FR</span></div>
                 <div class="rule-chips" id="preview-rules"></div>
@@ -152,6 +154,22 @@
 
             <aside class="profile-side">
               <article class="panel sticky-card"><span class="section-label">Lien généré</span><h3>Prêt à être partagé</h3><p>Ajoutez-le à vos bons de commande, signatures et instructions fournisseurs.</p><div class="share-preview"><span id="side-avatar">AN</span><div><strong id="side-company">Atelier Nova</strong><small>Vérification avant envoi</small></div></div><div class="link-box compact"><code id="side-link">—</code></div><button class="button lime full" type="button" data-copy-link>Copier le CheckLink</button><button class="button ghost full" type="button" data-route="checker">Ouvrir l’aperçu</button><div class="profile-transfer"><button class="button ghost" id="export-profile" type="button">Exporter le profil</button><button class="button ghost" id="import-profile" type="button">Importer</button><input id="profile-import-file" type="file" accept="application/json,.json" hidden></div><small class="legal-note">Le lien et l’export contiennent uniquement les exigences de réception. Aucune facture n’est publiée.</small></article>
+              <article class="panel publish-panel">
+                <span class="section-label">Registre public · opt-in</span>
+                <h3>Exigences publiques</h3>
+                <div id="member-login-form" class="member-login">
+                  <label><span>E-mail du membre</span><input id="member-email" type="email" autocomplete="username" required></label>
+                  <label><span>Mot de passe</span><input id="member-password" type="password" autocomplete="current-password" required></label>
+                  <label id="member-mfa-row" hidden><span>Code d'authentification (MFA)</span><input id="member-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code"></label>
+                  <button class="button ghost full" id="member-login-submit" type="button">Se connecter</button>
+                </div>
+                <div class="publish-actions">
+                  <button class="button primary full" id="publish-requirements" type="button">Publier mes exigences</button>
+                  <button class="button ghost full" id="unpublish-requirements" type="button">Dépublier</button>
+                </div>
+                <div class="identity-result idle" id="publish-status" aria-live="polite" hidden><span>—</span><div><strong>État</strong><small>La publication est un opt-in explicite : rien n'est cherchable sans elle.</small></div></div>
+                <small class="legal-note">Seules les exigences de réception sont publiées : jamais de facture, de secret ni de donnée bancaire.</small>
+              </article>
             </aside>
           </form>
         </section>
@@ -285,6 +303,11 @@
             <article class="source-card"><div class="source-icon profile-source">◎</div><span class="source-state">Actif dans le MVP</span><h3>Règles de l’acheteur</h3><p>Entité, adresse électronique, devises et références internes configurées dans CheckLink.</p><button class="source-link" type="button" data-route="profile">Modifier les règles →</button></article>
           </div>
           <div class="source-grid" id="national-packs"></div>
+          <article class="panel requirements-search-panel">
+            <div class="panel-head"><div><span class="section-label">Registre public · sans compte</span><h3>Trouver les exigences d'une entreprise</h3><p>Cherchez par raison sociale, numéro de TVA ou identifiant Peppol. Seules les entreprises qui publient explicitement leurs exigences apparaissent.</p></div></div>
+            <form id="requirements-search-form" class="identity-fields split"><label><span>Recherche</span><input id="requirements-query" type="search" minlength="2" maxlength="80" placeholder="Atelier Nova · FR11123456782 · 0009:123456782" autocomplete="off" required></label><button class="button primary" type="submit">Rechercher</button></form>
+            <div id="requirements-results" class="requirements-results" aria-live="polite" hidden></div>
+          </article>
           <article class="panel boundary-card"><div><span class="section-label">Périmètre du prototype</span><h3>Ce que signifie un résultat SettleMesh</h3></div><p>SettleMesh CheckLink exécute les artefacts indiqués et les règles du destinataire. VIES confirme un statut TVA ponctuel ; Peppol Directory confirme une présence d’annuaire ; PDF/A-3 reste un précontrôle structurel, pas une certification ISO. Aucun de ces résultats n’est un avis juridique ni une garantie d’acceptation par une administration, un client ou une plateforme agréée.</p></article>
         </section>
       </div>

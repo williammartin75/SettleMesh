@@ -25,6 +25,7 @@ import {
   summarizeLocalMetrics
 } from "./metrics.js";
 import { createNettingDemo, exportNettingCsv, nettingCsvTemplate, parseNettingCsv, simulateNetting } from "./netting.js";
+import { publishRequirements, searchRequirements, unpublishRequirements, verifyRequirements } from "./requirements.js";
 import { activePacks } from "./rules/index.mjs";
 import { validateEuropeanStandard } from "./standards.js";
 import { compactHistory, createPersistedState, readPersistedState, writePersistedState } from "./storage.js";
@@ -93,6 +94,7 @@ function loadState() {
 
 const state = loadState();
 let publicProfile = null;
+let currentSurfaceProfile = null;
 let currentView = "overview";
 let currentBatch = [];
 let historyQuery = "";
@@ -180,6 +182,7 @@ function parseLocation() {
 }
 
 function renderProfileSurface(profile) {
+  currentSurfaceProfile = profile;
   const avatar = initials(profile.companyName);
   $("#workspace-name").textContent = profile.companyName;
   $("#workspace-avatar").textContent = avatar;
@@ -719,6 +722,104 @@ function setupEvents() {
     const suffix = currentNettingSimulation.scenario.cutoffDate || "toutes-echeances";
     download(`settlemesh-propositions-${suffix}.csv`, exportNettingCsv(currentNettingSimulation), "text/csv;charset=utf-8");
   });
+
+  // — Registre public d'exigences —
+  $("#requirements-search-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const area = $("#requirements-results");
+    const query = $("#requirements-query").value.trim();
+    area.hidden = false;
+    area.innerHTML = `<div class="empty-inline">Recherche des exigences publiées…</div>`;
+    try {
+      const body = await searchRequirements(query);
+      if (!body.results.length) {
+        area.innerHTML = `<div class="empty-inline">Aucune exigence publiée ne correspond à « ${escapeHtml(query)} ». Seules les entreprises qui publient explicitement apparaissent.</div>`;
+        return;
+      }
+      area.innerHTML = body.results.map((result) => `<article class="requirement-result"><div><strong>${escapeHtml(result.profile.companyName || result.profile.legalName)}</strong><small>${escapeHtml(result.profile.country || "—")} · TVA ${escapeHtml(result.profile.vatId || "non publiée")} · ${escapeHtml((result.profile.acceptedFormats || []).join(", ") || "formats non publiés")}</small></div><span class="result-tag ready">publié</span></article>`).join("");
+    } catch (error) {
+      area.innerHTML = `<div class="empty-inline">${escapeHtml(error.message || "Recherche indisponible.")}</div>`;
+    }
+  });
+
+  $("#checklink-verify-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const area = $("#checklink-verify-result");
+    const profile = currentSurfaceProfile || state.profile;
+    if (!profile) return;
+    area.hidden = false;
+    area.className = "identity-result idle";
+    area.querySelector("strong").textContent = "Vérification en cours…";
+    try {
+      const body = await verifyRequirements(profile);
+      const labels = {
+        verified: ["Pass", "Le lien correspond aux exigences publiées par l'entreprise. Même verdict à l'instant de la requête."],
+        mismatch: ["Review", "Le profil du lien diverge des exigences publiées : prudence, demandez confirmation à l'acheteur."],
+        not_published: ["Review", "L'entreprise a enregistré des exigences mais ne les a pas publiées."],
+        unknown: ["Idle", "Aucune exigence publiée pour cette entreprise : la vérification officielle ne peut pas se prononcer."]
+      };
+      const [status, message] = labels[body.verdict] || ["Idle", body.reason];
+      area.className = `identity-result ${body.verdict === "verified" ? "verified" : body.verdict === "mismatch" ? "error" : "idle"}`;
+      area.querySelector("span").textContent = body.verdict === "verified" ? "✓" : body.verdict === "mismatch" ? "×" : "—";
+      area.querySelector("strong").textContent = status;
+      area.querySelector("small").textContent = message;
+    } catch (error) {
+      area.querySelector("strong").textContent = "Indisponible";
+      area.querySelector("small").textContent = error.message || "Le registre d'exigences n'est pas joignable.";
+    }
+  });
+
+  const memberLoginForm = $("#member-login-form");
+  $("#member-login-submit").addEventListener("click", () => memberLoginForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  memberLoginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = $("#publish-status");
+    const show = (state, label, detail) => {
+      status.hidden = false;
+      status.className = `identity-result ${state}`;
+      status.querySelector("span").textContent = state === "verified" ? "✓" : state === "error" ? "×" : "—";
+      status.querySelector("strong").textContent = label;
+      status.querySelector("small").textContent = detail;
+    };
+    try {
+      const payload = { email: $("#member-email").value.trim(), password: $("#member-password").value };
+      const code = $("#member-code").value.trim();
+      if (code) payload.code = code;
+      const response = await fetch("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const body = await response.json().catch(() => null);
+      if (response.ok) {
+        show("verified", "Connecté", `Rôle ${body?.member?.role} · publication disponible.`);
+        $("#member-mfa-row").hidden = true;
+        return;
+      }
+      if (body?.error?.code === "MFA_REQUIRED") {
+        $("#member-mfa-row").hidden = false;
+        show("idle", "MFA requis", "Saisissez le code de votre application d'authentification, puis reconnectez-vous.");
+        return;
+      }
+      show("error", "Connexion refusée", body?.error?.message || "Identifiants refusés.");
+    } catch (error) {
+      show("error", "Connexion indisponible", error.message || "Le serveur n'est pas joignable.");
+    }
+  });
+
+  $("#publish-requirements").addEventListener("click", async () => {
+    try {
+      const body = await publishRequirements(state.profile, { published: true });
+      toast("Exigences publiées", body.notice || "Cherchables publiquement, sans compte.");
+    } catch (error) {
+      toast("Publication impossible", error.message || "Connectez-vous d'abord (rôle admin ou owner).");
+    }
+  });
+  $("#unpublish-requirements").addEventListener("click", async () => {
+    try {
+      await unpublishRequirements();
+      toast("Exigences dépubliées", "Plus cherchable dans le registre public.");
+    } catch (error) {
+      toast("Dépublication impossible", error.message || "Connectez-vous d'abord.");
+    }
+  });
+
   window.addEventListener("hashchange", parseLocation);
 }
 

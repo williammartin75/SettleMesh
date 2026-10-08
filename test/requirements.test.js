@@ -192,6 +192,62 @@ test("l'organisation B ne peut pas écrire dans les exigences de l'organisation 
   }
 });
 
+test("publication via session membre exige l'en-tête CSRF et la bonne matrice", async () => {
+  const memberOwner = { organization_id: "atelier-nova", role: "owner" };
+  const memberViewer = { organization_id: "atelier-nova", role: "viewer" };
+  const rows = new Map([["atelier-nova", { ...publishedRow, published: false }]]);
+  let writtenFor = [];
+  const membersStore = {
+    findSession: async (id) => (id === "77777777-7777-7777-7777-777777777777" ? memberOwner : id === "88888888-8888-8888-8888-888888888888" ? memberViewer : null),
+    updatePassword: async () => true,
+    updateMfa: async () => null,
+    findMemberById: async () => null,
+    findMemberByEmail: async () => null,
+    createSession: async () => null,
+    deleteSession: async () => undefined
+  };
+  const store = {
+    upsert: async ({ organizationId }) => { writtenFor.push(organizationId); return { ...publishedRow, organization_id: organizationId }; },
+    search: async () => [],
+    findByIdentifier: async () => null,
+    delete: async () => true
+  };
+  const server = createSettleMeshServer({ membersStoreOption: membersStore, requirementsStoreOption: store });
+  const address = await listen(server, { port: 0 });
+  const url = `http://127.0.0.1:${address.port}/api/v1/requirements`;
+  const withSession = (id, extra = {}) => ({ Cookie: `settlemesh_session=${id}`, "X-SettleMesh-CSRF": "session", ...extra });
+  try {
+    // mutation de session sans en-tête CSRF → refus net
+    const noCsrf = await fetch(url, {
+      method: "POST",
+      headers: { Cookie: `settlemesh_session=77777777-7777-7777-7777-777777777777`, "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: { companyName: "Atelier Nova" }, published: true })
+    });
+    assert.equal(noCsrf.status, 403);
+    assert.equal((await noCsrf.json()).error.code, "CSRF_REQUIRED");
+
+    // session viewer + CSRF → 403 FORBIDDEN_ROLE
+    const viewerSession = await fetch(url, {
+      method: "POST",
+      headers: { Cookie: `settlemesh_session=88888888-8888-8888-8888-888888888888`, "X-SettleMesh-CSRF": "session", "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: { companyName: "Atelier Nova" }, published: true })
+    });
+    assert.equal(viewerSession.status, 403);
+    assert.equal((await viewerSession.json()).error.code, "FORBIDDEN_ROLE");
+
+    // session owner + CSRF → publication pour SA propre organisation
+    const ownerSession = await fetch(url, {
+      method: "POST",
+      headers: { Cookie: `settlemesh_session=77777777-7777-7777-7777-777777777777`, "X-SettleMesh-CSRF": "session", "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: { companyName: "Atelier Nova", legalName: "Atelier Nova SAS", vatId: "FR11123456782" }, published: true })
+    });
+    assert.equal(ownerSession.status, 201);
+    assert.deepEqual(writtenFor, ["atelier-nova"]);
+  } finally {
+    server.close();
+  }
+});
+
 test("sans stockage d'exigences, les réponses restent explicites (503) côté public comme authentifié", async () => {
   const server = createSettleMeshServer({});
   const address = await listen(server, { port: 0 });
@@ -203,6 +259,7 @@ test("sans stockage d'exigences, les réponses restent explicites (503) côté p
       method: "POST", headers: { Authorization: `Bearer ${adminKey.apiKey}`, "Content-Type": "application/json" }, body: "{}"
     });
     assert.equal(publish.status, 503);
+    assert.equal((await publish.json()).error.code, "REQUIREMENTS_UNAVAILABLE");
   } finally {
     server.close();
   }
